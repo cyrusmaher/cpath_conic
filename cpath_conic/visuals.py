@@ -953,13 +953,6 @@ def _performance_html(performance: dict | None) -> tuple[str, str]:
         """
     best_mpq_row = performance.get("best_mpq", best)
     overview = f"""
-      <section class='callout'>
-        <span class='eyebrow'>Challenge background</span>
-        <h2>CoNIC: Colon Nuclei Identification and Counting</h2>
-        <p>CoNIC was introduced for ISBI 2022 to benchmark automated analysis of H&amp;E-stained colon histology. It asks systems to identify individual nuclei, classify six cell types—epithelial, lymphocyte, plasma, eosinophil, neutrophil, and connective tissue—and estimate cellular composition. The challenge dataset contains more than 535,000 annotated nuclei collected across 16 centres.</p>
-        <p><strong>This dashboard is a reproducible internal evaluation, not an official challenge submission.</strong> Its 657-patch locked test split should not be compared numerically with the hidden final-test leaderboard as though the evaluation sets were identical.</p>
-        <p><a class='primary-button' href='https://conic-challenge.grand-challenge.org/evaluation/segmentation-and-classification-final-test/leaderboard/' target='_blank' rel='noreferrer'>Official segmentation &amp; classification leaderboard ↗</a></p>
-      </section>
       <h2>Improvement over baseline</h2>
       <p class='method-note'>Baseline is the initial CellViT-SAM-H model; the selected model is
       {html.escape(best_mpq_row.get('method', 'the recommended HoVer-Net'))}. Both are scored on the retrospective
@@ -1304,6 +1297,13 @@ def write_gallery(outdir: Path, cases: list[dict], triage: list[dict], performan
     .swatch-target{width:1.1rem;height:0;border-top:2px dashed #eda100}
     </style></head><body>
     <header class='topbar'><div class='brand'><h1>CoNIC experiment dashboard</h1><a class='repo-link' href='https://github.com/cyrusmaher/cpath_conic' target='_blank' rel='noreferrer'>View code repository ↗</a></div><nav class='tabs' aria-label='Dashboard sections'><button class='active' data-tab='overview'>Where we stand</button><button data-tab='experiments'>What we tried</button><button data-tab='diagnostics'>Error analysis</button><button data-tab='metrics'>Metric definitions</button></nav></header><main class='shell'>
+    <section class='callout' aria-labelledby='conic-background-title'>
+      <span class='eyebrow'>Challenge background</span>
+      <h2 id='conic-background-title'>What is CoNIC?</h2>
+      <p><strong>CoNIC</strong> stands for <strong>Colon Nuclei Identification and Counting</strong>. Introduced for ISBI 2022, it benchmarks automated analysis of H&amp;E-stained colon histology: finding individual nuclei, outlining them, assigning one of six cell types—epithelial, lymphocyte, plasma, eosinophil, neutrophil, or connective tissue—and estimating the cellular composition of each image. The challenge dataset contains more than 535,000 annotated nuclei from 16 centres.</p>
+      <p><strong>This dashboard reports a reproducible internal evaluation, not an official challenge submission.</strong> Its 657-patch locked test split is different from the challenge's hidden final test, so the numbers are not directly interchangeable with leaderboard scores.</p>
+      <p><a class='primary-button' href='https://conic-challenge.grand-challenge.org/evaluation/segmentation-and-classification-final-test/leaderboard/' target='_blank' rel='noreferrer'>Official segmentation &amp; classification leaderboard ↗</a></p>
+    </section>
     <section id='overview' class='tab-panel active'><h1>Where we stand</h1><p class='section-deck'>The recommended final model, how it is built, and its improvement over the initial baseline on both measures.</p>%s</section>
     <section id='experiments' class='tab-panel'><h1>What we tried</h1><p class='section-deck'>The path from baseline to the recommended model, then every ablation and combination with its verdict — mostly negative results, each scored against a matched control — plus complete idea attribution.</p>%s</section>
     <section id='diagnostics' class='tab-panel'><h1>Error analysis</h1><p class='section-deck'>Subgroup metrics, signed count bias, typed-detection confusion, and patch-level ground-truth review for the current best.</p>%s
