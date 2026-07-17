@@ -1,0 +1,2113 @@
+{
+  "selection_policy": {
+    "data": "All hyperparameters, learning rates, epochs, rejection thresholds, and loss weights are selected on validation only.",
+    "learning_rates_classifier": [0.0001, 0.0003, 0.001],
+    "learning_rates_lora": [0.00001, 0.00003, 0.0001],
+    "learning_rates_hovernet_pilot": [0.00003, 0.0001, 0.0003],
+    "hovernet_boundary_rule": "R2 and mPQ+ select LR/checkpoint independently. If a candidate wins at the minimum/maximum searched LR or latest scored epoch, expand that boundary before full-horizon promotion; an already-superior independent metric branch need not inherit the other branch's expansion.",
+    "hovernet_temporal_confirmation": "The 10-epoch three-LR screen scores epochs 1, 5, and 10 as a coarse bracket. An intervention must first beat its exact matched control. Only then rerun the metric-specific candidate LR with dense validation scoring across the plausible peak interval before locking its checkpoint; expand any LR or horizon boundary before promotion.",
+    "metric_specific_promotion": {
+      "R2": "Require matched macro-R2 improvement and inspect exact source-by-class SSE contributions, signed bias, MAE, and directional |error|>5/10/20 proportions. An R2 gain with worse tail prevalence is a disclosed tradeoff, not an unqualified promotion.",
+      "mPQ+": "Require matched pooled mPQ+ improvement driven by DQ without a material SQ/boundary regression; inspect per-class TP/FP/FN and class-agnostic matched-instance confusion, especially neutrophil/eosinophil misses and spurious predictions."
+    },
+    "test": "Run once after each experiment family is locked; reported development-time test results are flagged as exploratory.",
+    "frequency_shift": "Fit vector calibration on validation labels, then estimate train-to-test prior ratios from unlabeled test probabilities with EM. Never fit to test counts or labels."
+  },
+  "experiments": [
+    {
+      "id": "E00",
+      "name": "raw_cellvit_simple_watershed",
+      "status": "complete",
+      "change": "Reference run using the original six-class weighted-CE head and distance-transform watershed."
+    },
+    {
+      "id": "E01",
+      "name": "validation_vector_calibration",
+      "status": "complete",
+      "change": "Temperature plus per-class logit biases fit on matched validation instances."
+    },
+    {
+      "id": "E02",
+      "name": "margin_dustbin",
+      "status": "complete",
+      "change": "Reject instances below a validation-selected top-1 minus top-2 probability margin."
+    },
+    {
+      "id": "E03",
+      "name": "official_hv_postprocessor",
+      "status": "complete",
+      "change": "Use CellViT's learned HV maps with an explicit validation-tuned 20x decoder; no training."
+    },
+    {
+      "id": "E04",
+      "name": "learned_dustbin",
+      "status": "complete",
+      "change": "Seven-class head; predictions with best GT IoU <= 0.5 supervise the dustbin class.",
+      "selection_metric": "mean(validation R2, validation mPQ+)"
+    },
+    {
+      "id": "E05",
+      "name": "differentiable_patch_count",
+      "status": "complete",
+      "change": "E04 plus normalized differentiable central-patch count loss.",
+      "loss_weight_sweep": [0.1, 0.3, 1.0],
+      "selection_metric": "validation R2"
+    },
+    {
+      "id": "E06",
+      "name": "soft_pooled_pq",
+      "status": "complete",
+      "change": "E05 plus matched-IoU soft pooled-PQ surrogate.",
+      "loss_weight_sweep": [0.1, 0.3, 1.0],
+      "selection_metric": "validation mPQ+"
+    },
+    {
+      "id": "E07",
+      "name": "sam_h_lora_segmentation",
+      "status": "complete",
+      "change": "Rank-4 LoRA on QKV and projection layers in the final eight SAM-H blocks, with frozen base normalization buffers and deployment-matched float32 batch-1 validation.",
+      "selection_metric": "validation binary PQ",
+      "selected_learning_rate": 0.00001,
+      "selected_epoch": 2,
+      "validation_binary_pq": 0.5388923107307547,
+      "test_raw": {"R2": 0.3978793748383381, "mPQ+": 0.2884986686495176},
+      "test_calibrated": {"R2": 0.675147642062786, "mPQ+": 0.2912410194961056}
+    },
+    {
+      "id": "E08",
+      "name": "official_hovernet_conic_control",
+      "status": "complete — exact public-fold reproduction",
+      "change": "Reproduce the challenge authors' official CoNIC-trained HoVer-Net baseline with their public checkpoint and evaluator-facing output format.",
+      "checkpoint": "checkpoints/hovernet-conic.pth",
+      "checkpoint_sha256": "34d8edba4345142a51719e89d4d6a5e971cf273875337e739c0409ff75c396b1",
+      "published_validation": {"R2": 0.8585, "mPQ+": 0.4998},
+      "reproduced_validation": {"R2": 0.8584295821897904, "mPQ+": 0.49977310249140183, "n_patches": 1018},
+      "comparability": "The published values use the authors' group/source-stratified fold, so they are a reproducibility target rather than a paired score on our split."
+    },
+    {
+      "id": "E09",
+      "name": "flip_tta_map_ensemble",
+      "status": "complete",
+      "change": "Pathology-AI-inspired averaging of original, horizontal-flip, and vertical-flip foreground/HV/token maps before locked decoding; HV signs are corrected after flips.",
+      "selection_metric": "validation binary PQ, with decoder locked from E03"
+    },
+    {
+      "id": "E10",
+      "name": "pathology_ai_robust_augmentation",
+      "status": "complete — not promoted",
+      "change": "Isolated stain/color jitter plus small blur augmentation during segmentation adaptation; avoid geometric distortion, which hurt the published winner's ablation.",
+      "selection_metric": "deployment-matched validation binary PQ, followed by class/source validation audit before full extraction",
+      "augmentation": {
+        "brightness_contrast_saturation": "independent ±10%, randomized order",
+        "gaussian_blur_probability": 0.3,
+        "gaussian_blur_radius": [0.3, 1.0],
+        "geometric_distortion": false
+      },
+      "selected_learning_rate": 0.0001,
+      "selected_epoch": 12,
+      "validation_binary_pq": 0.543003461588077,
+      "uniform_lora_validation_binary_pq": 0.5388923107307547,
+      "validation_binary_decomposition": {
+        "matched_delta": -1650,
+        "false_positive_delta": -2476,
+        "DQ_delta": -0.0021449134280354,
+        "SQ_delta": 0.008032410114446
+      },
+      "rare_class_recall_delta": {
+        "neutrophil": -0.22235576923076927,
+        "eosinophil": -0.11623246492985972,
+        "plasma": 0.023465703971119134
+      },
+      "interpretation": "Rejected despite higher pooled bPQ: smoothing/conservatism removes false positives and raises SQ but loses many nuclei, especially neutrophils and eosinophils; DPath improves while CRAG and GLaS regress. Split color and blur into separate ablations."
+    },
+    {
+      "id": "E11",
+      "name": "map_level_model_ensemble",
+      "status": "planned",
+      "change": "Average raw foreground/HV maps from independently selected models or seeds before one shared postprocessor, rather than merging final masks.",
+      "selection_metric": "validation R2 and mPQ+"
+    },
+    {
+      "id": "E12",
+      "name": "two_x_hv_decoding",
+      "status": "complete",
+      "change": "Upsample foreground/HV maps to 0.25-mpp-equivalent 2× resolution before validation-tuned watershed, then downsample instances with nearest-neighbor interpolation.",
+      "selection_metric": "validation binary PQ",
+      "validation_binary_pq": 0.54577,
+      "validation_flip_tta_binary_pq": 0.56570,
+      "test_raw": {"R2": 0.36203017510933583, "mPQ+": 0.2939581687325769},
+      "test_calibrated": {"R2": 0.5709384723367236, "mPQ+": 0.2945795023056533}
+    },
+    {
+      "id": "E13",
+      "name": "two_x_hv_flip_tta",
+      "status": "complete",
+      "change": "Combine validation-selected 2× HV decoding with identity/horizontal/vertical raw-map and token flip-TTA.",
+      "selection_metric": "locked 2× decoder validation binary PQ, then classifier validation macro-F1 and validation-only vector calibration",
+      "validation_binary_pq": 0.56570,
+      "classifier_learning_rate": 0.0001,
+      "classifier_selected_epoch": 30,
+      "classifier_validation_macro_f1": 0.5848040436161105,
+      "test_raw": {"R2": 0.3607492365503375, "mPQ+": 0.31593850681846286},
+      "test_calibrated": {"R2": 0.621882710111893, "mPQ+": 0.32154150129260484},
+      "interpretation": "Pareto tradeoff versus native-resolution flip-TTA: +0.00377 mPQ+ but -0.07217 R2 after validation-only calibration. Boundary/shape quality remains strong; rare-class detection quality and non-transferable class-count bias drive the R2 loss."
+    },
+    {
+      "id": "E14",
+      "name": "minority_patch_sampling_lora",
+      "status": "complete — not promoted",
+      "change": "True-LoRA segmentation with image-level replacement sampling where each class contributes patch_count / total_class_count, blended 50/50 with uniform sampling; no augmentation or loss change.",
+      "selection_metric": "deployment-matched validation binary PQ",
+      "sampling_blend": 0.5,
+      "sampling_effective_sample_size": 2857.2811901630685,
+      "selected_learning_rate": 0.00001,
+      "selected_epoch": 2,
+      "validation_binary_pq": 0.5392557317371273,
+      "uniform_lora_validation_binary_pq": 0.5388923107307547,
+      "rare_class_detection_audit": {
+        "neutrophil_matched_delta": -3,
+        "plasma_matched_delta": 7,
+        "eosinophil_matched_delta": 3,
+        "all_class_matched_delta": -22,
+        "binary_false_positive_delta": -123
+      },
+      "interpretation": "Not promoted to full extraction: the +0.00036 validation bPQ change is driven mainly by fewer binary false positives, while rare-class recall changes are tiny and neutrophil matches decrease."
+    },
+    {
+      "id": "E15",
+      "name": "color_jitter_only_lora",
+      "status": "complete — not promoted",
+      "change": "Isolate ±10% brightness/contrast/saturation jitter during uniform-sampling true-LoRA training; no blur, sampling change, or geometric transform.",
+      "selection_metric": "deployment-matched validation binary PQ, then class/source detection gate",
+      "selected_learning_rate": 0.00001,
+      "selected_epoch": 2,
+      "validation_binary_pq": 0.5388497422455949,
+      "uniform_lora_validation_binary_pq": 0.5388923107307547,
+      "interpretation": "Null result: 12 fewer matches overall; neutrophil unchanged, eosinophil -1, plasma +1. Source effects are negligible."
+    },
+    {
+      "id": "E16",
+      "name": "light_blur_only_lora",
+      "status": "deprioritized",
+      "change": "Isolate light Gaussian blur during uniform-sampling true-LoRA training to test whether blur caused the E10 small/rare-nucleus recall loss.",
+      "selection_metric": "deployment-matched validation binary PQ, then class/source detection gate",
+      "interpretation": "Combined E10 versus color-only E15 already implicates blur-enabled prolonged training in the conservative high-SQ/low-recall failure; direct type-head work has higher expected value."
+    },
+    {
+      "id": "E17",
+      "name": "complement_balanced_focal_type_head",
+      "status": "complete",
+      "change": "On fixed best-TTA masks/tokens, compare a matched inverse-frequency CE control against focal loss with complement-frequency weights (1-f_c)^3 and label smoothing 0.05.",
+      "selection_metric": "mean(validation R2, validation mPQ+) with bracketed learning-rate sweep",
+      "selected_learning_rate": 0.0003,
+      "selected_epoch": 11,
+      "validation": {"R2": 0.7023652962541265, "mPQ+": 0.3226742276780907},
+      "test_raw": {"R2": 0.7206076749621112, "mPQ+": 0.3183826984812212},
+      "test_calibrated_rejected": {"R2": 0.5246833267129817, "mPQ+": 0.279503471347704},
+      "interpretation": "New strongest balanced method. Milder complement-frequency weighting plus focal emphasis sharply improves rare-class count R2 without the inverse-frequency CE control's false-positive instability. Calibration is excluded because it degrades validation and test."
+    },
+    {
+      "id": "E18",
+      "name": "two_x_tta_complement_balanced_focal",
+      "status": "complete — not promoted",
+      "change": "Apply the validation-selected E17 complement-balanced focal type-head recipe to the locked E13 2× HV + flip-TTA masks/tokens.",
+      "selection_metric": "mean(validation R2, validation mPQ+) with a fresh bracketed learning-rate sweep",
+      "rationale": "E13 provides the PQ high-water masks but has unstable count bias; E17 fixes that exact failure mode on native-resolution TTA masks.",
+      "selected_learning_rate": 0.001,
+      "selected_epoch": 11,
+      "validation": {"R2": 0.6507491102895934, "mPQ+": 0.3220243742941489},
+      "test": {"R2": 0.6251112545501254, "mPQ+": 0.3155014272541153},
+      "interpretation": "Rejected: 2× masks remain harder to type/count. Epithelial/lymphocyte/plasma PQ improve, but neutrophil PQ and connective R2 regress enough to lose both aggregate metrics versus E17."
+    },
+    {
+      "id": "E19",
+      "name": "native_tta_type_probability_ensemble",
+      "status": "complete — Pareto",
+      "change": "Blend E17 focal and previous validation-calibrated TTA type-head logits on identical native-TTA instances; select focal weight on validation mean(R2, mPQ+).",
+      "selection_metric": "mean(validation R2, validation mPQ+) over a locked alpha grid",
+      "selected_focal_alpha": 0.65,
+      "validation": {"R2": 0.7077808231755469, "mPQ+": 0.324717859922684},
+      "test": {"R2": 0.7085121193513771, "mPQ+": 0.3224152957112447},
+      "interpretation": "PQ-oriented Pareto point: recovers neutrophil/lymphocyte PQ but loses plasma/eosinophil count R2; validation mean improves but the balanced test mean does not beat pure focal."
+    },
+    {
+      "id": "E20",
+      "name": "focal_hyperparameter_ablation",
+      "status": "complete — not promoted",
+      "change": "On fixed native-TTA masks/tokens, ablate complement-weight exponent, focal gamma, and label smoothing around E17; use the same LR bracket and validation mean(R2, mPQ+).",
+      "selection_metric": "best validation mean(R2, mPQ+) across a predeclared local grid; test only the selected configuration",
+      "grid": [
+        {"rho": 3, "gamma": 2, "label_smoothing": 0.05, "role": "E17 reference"},
+        {"rho": 2, "gamma": 2, "label_smoothing": 0.05},
+        {"rho": 4, "gamma": 2, "label_smoothing": 0.05},
+        {"rho": 3, "gamma": 1, "label_smoothing": 0.05},
+        {"rho": 3, "gamma": 3, "label_smoothing": 0.05},
+        {"rho": 3, "gamma": 2, "label_smoothing": 0.0}
+      ],
+      "selected": {"rho": 2, "gamma": 2, "label_smoothing": 0.05, "learning_rate": 0.001, "epoch": 17},
+      "validation": {"R2": 0.7116833247742503, "mPQ+": 0.31789122927066854},
+      "test": {"R2": 0.7004951524741004, "mPQ+": 0.31273323033573586},
+      "interpretation": "Rejected: the small local-grid validation gain did not transfer and loses both test metrics versus the literature-anchored E17 recipe."
+    },
+    {
+      "id": "E21",
+      "name": "rotation_augmented_raw_map_tta",
+      "status": "complete — composite/PQ Pareto",
+      "change": "Extend raw-map TTA with 90/180/270-degree rotations, spatially invert predictions, and exactly transform horizontal/vertical vector channels before averaging and decoding.",
+      "selection_metric": "validation binary PQ with the decoder locked; full extraction only after transform-unit tests and a validation gain",
+      "validation_binary": {
+        "flip_tta_bPQ": 0.5529748667635016,
+        "flip_rotation_tta_bPQ": 0.5656594321771896,
+        "DQ": 0.7368848977610581,
+        "SQ": 0.7676360770805347,
+        "count_ratio": 0.9471190765922758
+      },
+      "classifier_selected_learning_rate": 0.0003,
+      "classifier_selected_epoch": 18,
+      "validation": {"R2": 0.7167385259585838, "mPQ+": 0.3326762653077324},
+      "test": {"R2": 0.7122917036424946, "mPQ+": 0.3302689084273938},
+      "tail_audit": {
+        "target_R2": 0.76413,
+        "filter_absolute_error_above": 19,
+        "filter_affected_points": 88,
+        "filter_result_R2": 0.7655336491162853,
+        "fix_absolute_error_above": 22,
+        "fix_affected_points": 54,
+        "fix_result_R2": 0.7686451504031364
+      },
+      "interpretation": "All six class PQ values improve over E17 and mean(test R2, test mPQ+) is slightly higher, but R2 falls 0.0083. Rotation consensus suppresses counts: CRAG SSE improves substantially, while GLaS/DPath undercount tails and lymphocyte count SSE worsen. Retain as the single-model PQ/composite Pareto point; E17 remains the R2 high-water."
+    },
+    {
+      "id": "E22",
+      "name": "validation_selected_per_class_count_ensemble",
+      "status": "complete — promoted combination",
+      "change": "Keep E21 rotation-TTA masks and validation-select one convex E17/E21 count blend weight per cell class on a fixed 0.05 grid.",
+      "selection_metric": "per-class validation R2; test labels are untouched until one locked evaluation",
+      "selected_e17_weights": {
+        "neutrophil": 0.8,
+        "epithelial": 0.75,
+        "lymphocyte": 0.15,
+        "plasma": 0.4,
+        "eosinophil": 0.4,
+        "connective": 0.1
+      },
+      "validation": {"R2": 0.7358175887875303, "mPQ+": 0.3326762653077324},
+      "test": {"R2": 0.7254970622324938, "mPQ+": 0.3302689084273938},
+      "tail_audit": {
+        "target_R2": 0.76413,
+        "filter_absolute_error_above": 20,
+        "filter_affected_points": 61,
+        "filter_result_R2": 0.7641768227220882,
+        "fix_absolute_error_above": 25,
+        "fix_affected_points": 34,
+        "fix_result_R2": 0.7650302040826676
+      },
+      "interpretation": "Promoted: validation and test R2 both beat either endpoint, while unchanged E21 masks preserve the PQ high-water. This cleanly decouples the count estimator from segmentation and directly aligns the count output with the leaderboard R2 metric."
+    },
+    {
+      "id": "E23",
+      "name": "hed_stain_space_augmentation",
+      "status": "complete — pooled gain rejected by guardrail",
+      "change": "P2: color-deconvolve H&E, perturb stain-channel intensity and contrast, then reconstruct RGB so source-specific color fingerprints are suppressed without geometric distortion.",
+      "selection_metric": "source-held-out validation bPQ plus signed count-bias/tail audit; main validation is reported but cannot be the only gate",
+      "guardrail": "Compare against color-jitter-only E15 at matched sampling, LR bracket, epochs, and LoRA capacity. Reject gains driven by fewer detections or worse minority-source undercount tails.",
+      "selected_learning_rate": 0.0001,
+      "selected_epoch": 9,
+      "validation_binary_pq": 0.5412097829573215,
+      "uniform_lora_validation_binary_pq": 0.5388923107307527,
+      "paired_bootstrap_delta_95_ci": [-0.0004991920087554919, 0.005309074529675526],
+      "detection_audit": {
+        "matched_delta": -1777,
+        "predicted_delta": -4022,
+        "DQ_delta": -0.0041593843554808,
+        "SQ_delta": 0.0076673348344645,
+        "neutrophil_recall_delta": -0.21634615384615385,
+        "eosinophil_recall_delta": -0.13026052104208413,
+        "dpath_bPQ_delta": 0.0266653043562566,
+        "glas_bPQ_delta": -0.0189172999923166
+      },
+      "interpretation": "Rejected as a standalone recipe: the pooled bPQ increase is a DPath-heavy SQ/conservatism effect that removes many detections and sharply harms rare-cell and GLaS recall. A separately persisted low-LR neutral candidate may still be tested for interaction with P5."
+    },
+    {
+      "id": "E24",
+      "name": "source_balanced_and_source_aware_sampling",
+      "status": "complete — not promoted",
+      "change": "Allocate segmentation-training sampling budget across source repositories, optionally crossed with rare-class presence, so minority institutions are not drowned out by CRAG/DPath volume.",
+      "selection_metric": "mean source-held-out bPQ with worst-source and signed-tail guardrails",
+      "guardrail": "Run source-balanced alone first, then source×class-aware sampling; keep augmentation and loss fixed for attribution.",
+      "sampling_blend": 0.5,
+      "effective_sample_size": 1654.5858582686888,
+      "selected_learning_rate": 0.00001,
+      "selected_epoch": 2,
+      "validation_binary_pq": 0.5383240682314139,
+      "uniform_lora_validation_binary_pq": 0.5388923107307527,
+      "paired_bootstrap_delta_95_ci": [-0.0009066554110051334, -0.0002552687466006482],
+      "interpretation": "Rejected: equal-source budget is a small but statistically consistent negative result. Class and source detection deltas are tiny, so there is no hidden minority-source gain to justify full extraction or the source×class follow-up before higher-priority P5."
+    },
+    {
+      "id": "E25",
+      "name": "multiple_fit_raw_map_ensemble",
+      "status": "complete — not promoted",
+      "change": "Train multiple independently seeded and/or augmentation-diverse fits, average aligned foreground/HV maps before one locked decoder, and validation-select type/count combination weights.",
+      "selection_metrics": {
+        "mPQ+": "validation mPQ+ with per-class/source DQ and SQ audit",
+        "R2": "exact validation macro-R2 with per-source signed-error and outlier-tail audit"
+      },
+      "guardrail": "Measure individual fits first; ensemble only validation-qualified members and never merge already-decoded instance masks.",
+      "result": {
+        "clean_flip_tta_validation_bPQ": 0.55798,
+        "directional_flip_tta_validation_bPQ": 0.5647646,
+        "channelwise_raw_map_ensemble_validation_bPQ": 0.56381,
+        "interpretation": "The corrected channel-wise ensemble preserved E26's diagonal maps but still trailed E26 alone, so diversity was insufficient and the ensemble was rejected before downstream benchmarking."
+      }
+    },
+    {
+      "id": "E26",
+      "name": "diagonal_distance_channels",
+      "status": "complete — binary segmentation qualified; downstream recipe not promoted",
+      "change": "P5 from the leaderboard review: add +45° and −45° directional distance targets alongside H/V and extend the locked watershed decoder to use them in crowded regions.",
+      "selection_metrics": {
+        "segmentation_gate": "source-held-out binary PQ",
+        "mPQ+": "validation mPQ+ after a fresh type-head LR sweep",
+        "R2": "exact validation macro-R2 after a fresh count-head LR sweep"
+      },
+      "guardrail": "Keep this separate from P2 stain augmentation so color robustness and crowded-instance separation remain attributable.",
+      "result": {
+        "selected_learning_rate": 3e-06,
+        "selected_epoch": 8,
+        "native_validation_bPQ": 0.5448598614311039,
+        "native_vs_clean_lora_delta_bPQ": 0.005967550700349711,
+        "native_vs_clean_lora_paired_bootstrap_95_ci": [
+          0.004835060370155753,
+          0.007046580886629024
+        ],
+        "directional_decoder_weight": 0.5,
+        "weighted_native_validation_bPQ": 0.5460047,
+        "flip_tta_validation_bPQ": 0.5647646,
+        "flip_tta_vs_clean_lora_delta_bPQ": 0.0258723,
+        "flip_tta_vs_native_paired_bootstrap_95_ci": [
+          0.0243470,
+          0.0274693
+        ],
+        "leave_glas_clean_tta_bPQ": 0.4850968,
+        "leave_glas_directional_tta_bPQ": 0.4994558,
+        "leave_glas_delta_bPQ": 0.0143591,
+        "leave_glas_paired_bootstrap_95_ci": [0.0119273, 0.0166201],
+        "r2_selected_validation": {"R2": 0.6798150, "mPQ+": 0.3197781},
+        "r2_selected_test": {"R2": 0.6829639, "mPQ+": 0.3176692},
+        "mpq_selected_validation": {"R2": 0.6466041, "mPQ+": 0.3228629},
+        "mpq_selected_test": {"R2": 0.6670655, "mPQ+": 0.3124428},
+        "mechanism": "Four-direction decoding robustly improves binary PQ on the standard and leave-GLaS-out validation splits. The gain does not transfer through a fresh six-way head: changed LoRA/TTA token representations and instance mix reduce type quality, especially lymphocyte/eosinophil performance. The validation-selected PQ surrogate also fails to transfer.",
+        "visual_audit": "Rendered the four largest per-patch gains and losses for both native and TTA decoding; losses remain visible for human review rather than being hidden by aggregate selection."
+      }
+    },
+    {
+      "id": "E27",
+      "name": "e26_masks_with_stable_base_tokens",
+      "status": "complete — stable tokens recover typing but recipe not promoted",
+      "change": "Keep E26 four-direction flip-TTA instance masks fixed but replace LoRA-drifted token features with untouched CellViT-SAM-H flip+rotation-TTA tokens pooled over the same instances.",
+      "selection_metrics": {
+        "R2": "exact validation macro-R2 with an independent bracketed LR sweep",
+        "mPQ+": "validation mPQ+ with an independent bracketed LR sweep"
+      },
+      "guardrail": "Require exact (patch_id, instance_id) alignment, finite features, and no mask regeneration; compare class/source DQ and confusion drivers, not only aggregate test metrics.",
+      "smoke_result": {
+        "patches": 8,
+        "instances": 1251,
+        "exact_instance_alignment": true,
+        "all_features_finite": true,
+        "mean_cosine_vs_e26_lora_flip_tokens": 0.9007261,
+        "p05_cosine_vs_e26_lora_flip_tokens": 0.8669305
+      },
+      "result": {
+        "feature_records": 562048,
+        "exact_instance_alignment": true,
+        "features_sha256": "6d33168daf7552300be45ed95908e6126c0abd0e656dede0f3ebc59014365d12",
+        "frozen_e21_head_test": {"R2": 0.7041811, "mPQ+": 0.3255053},
+        "r2_selected": {
+          "learning_rate": 0.0003,
+          "epoch": 11,
+          "validation": {"R2": 0.6958090, "mPQ+": 0.3308523},
+          "test": {"R2": 0.7180354, "mPQ+": 0.3256408}
+        },
+        "mpq_selected": {
+          "learning_rate": 0.001,
+          "epoch": 13,
+          "validation": {"R2": 0.6421849, "mPQ+": 0.3347101},
+          "test": {"R2": 0.7047963, "mPQ+": 0.3292961},
+          "selection_note": "Patience 5 prematurely stopped LR 1e-3 at epoch 8; the accepted selection used an equal 20-epoch horizon for all rates."
+        },
+        "mechanism": "Stable base-model tokens recover most of E26's LoRA-token penalty, but E26 geometry adds typed false positives and lowers SQ across most classes. The R2 head improves epithelial, lymphocyte, and eosinophil SSE but worsens plasma; the validation mPQ gain does not transfer. Mask-determined signed total-count bias persists across heads: GLaS undercounts and CRAG overcounts."
+      }
+    },
+    {
+      "id": "E28",
+      "name": "e22_e27_metric_specific_count_ensemble",
+      "status": "complete — promoted R2 recipe",
+      "change": "Blend E22 and E27-R2 central-crop counts independently per class, retaining E21 masks and therefore unchanged mPQ+.",
+      "selection_metric": "per-class validation R2 over alpha increments of 0.05",
+      "guardrail": "No test labels enter alpha selection; mPQ+ remains the E21 mask/type score and is not recomputed from blended counts.",
+      "result": {
+        "selected_e22_weights": {
+          "neutrophil": 0.95,
+          "epithelial": 0.45,
+          "lymphocyte": 1.0,
+          "plasma": 0.8,
+          "eosinophil": 0.7,
+          "connective": 0.75
+        },
+        "validation": {"R2": 0.7403299, "mPQ+": 0.3302689},
+        "test": {"R2": 0.7319996, "mPQ+": 0.3302689},
+        "delta_test_R2_vs_E22": 0.0065025,
+        "interpretation": "Validation-selected E27 contributions transfer for epithelial, eosinophil, and connective counts. E22 remains effectively unchanged for neutrophil and lymphocyte. Plasma R2 falls slightly, but macro R2 gains and mPQ+ is unchanged because E21 pixel masks/types remain the segmentation output."
+      }
+    },
+    {
+      "id": "E29",
+      "name": "e21_per_class_confidence_rejection",
+      "status": "complete — validation gain failed transfer",
+      "change": "Select one raw top-1 confidence rejection threshold per predicted class on validation class PQ.",
+      "selection_metric": "per-class validation PQ on a 0.01 threshold grid",
+      "guardrail": "Reject if the pooled mPQ+ gain is small or does not transfer; do not use test labels to retain only favorable classes.",
+      "result": {
+        "thresholds": {"neutrophil": 0.27, "epithelial": 0.38, "lymphocyte": 0.36, "plasma": 0.31, "eosinophil": 0.31, "connective": 0.34},
+        "validation_raw": {"R2": 0.7167385, "mPQ+": 0.3326763},
+        "validation_selected": {"R2": 0.7135551, "mPQ+": 0.3340886, "rejected_fraction": 0.0191100},
+        "test_raw": {"R2": 0.7122917, "mPQ+": 0.3302689},
+        "test_selected": {"R2": 0.7049793, "mPQ+": 0.3301968, "rejected_fraction": 0.0197274},
+        "interpretation": "Rejected. The +0.00141 validation mPQ gain is too small and test is effectively flat/slightly negative while R2 falls 0.00731. Lymphocyte, plasma, and connective test PQ improve slightly, but eosinophil, epithelial, and neutrophil offset them."
+      }
+    },
+    {
+      "id": "E30",
+      "name": "e21_e27_source_gated_mpq_ensemble",
+      "status": "complete — promoted mPQ+ recipe",
+      "change": "Route each known source repository wholesale to E21 or E27-mPQ, selected by exact pooled validation mPQ+ from additive PQ sufficient statistics.",
+      "selection_metric": "exact pooled validation mPQ+ over all 32 source-routing combinations",
+      "guardrail": "Route only on pre-existing source metadata; no patch-level confidence or test labels; report source and class mechanisms.",
+      "result": {
+        "selected_route": {"consep": "E21", "crag": "E21", "dpath": "E27-mPQ", "glas": "E21", "pannuke": "E27-mPQ"},
+        "validation": {"R2": 0.6840997, "mPQ+": 0.3406416},
+        "test": {"R2": 0.7225901, "mPQ+": 0.3330911},
+        "delta_test_mPQ_vs_E21": 0.0028222,
+        "validation_route_bootstrap": {
+          "replicates": 2000,
+          "dpath_delta_95_ci": [0.0088812, 0.0243594],
+          "dpath_probability_E27_better": 1.0,
+          "pannuke_delta_95_ci": [0.0040410, 0.0318415],
+          "pannuke_probability_E27_better": 0.993,
+          "crag_probability_E27_better": 0.0,
+          "consep_probability_E27_better": 0.0115,
+          "glas_probability_E27_better": 0.034
+        },
+        "interpretation": "Promoted as the mPQ+ recipe. Validation selects E27 only for DPath and PanNuke, exactly the two sources where its test mPQ also improves. Plasma, eosinophil, connective, and lymphocyte pooled PQ rise; neutrophil falls slightly because E27 trades more detections for lower SQ."
+      }
+    },
+    {
+      "id": "E31",
+      "name": "extended_sobel_and_edge_threshold_search",
+      "status": "complete — TTA gain indistinguishable from zero",
+      "change": "Extend the validation-only HV decoder search below the previous Sobel-kernel boundary and above the previous edge-threshold boundary, then repeat edge and kernel passes to account for their interaction.",
+      "selection_metric": "pooled validation binary PQ; no test labels used",
+      "grid": {
+        "sobel_kernel": [1, 3, 5, 7, 11, 15, 21],
+        "edge_threshold": [0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95, 0.99]
+      },
+      "result": {
+        "selected_config": {
+          "binary_threshold": 0.6,
+          "edge_threshold": 0.5,
+          "object_size": 1,
+          "ksize": 3,
+          "opening_size": 5,
+          "min_nucleus_size": 3,
+          "directional_weight": 1.0
+        },
+        "native_validation_bPQ": 0.547173,
+        "flip_tta_validation_bPQ": 0.5648045,
+        "previous_flip_tta_validation_bPQ": 0.5647646,
+        "flip_tta_delta_bPQ": 0.0000399,
+        "paired_bootstrap_95_ci": [-0.0009100, 0.0010242],
+        "matched_delta": -141,
+        "mechanism": "The initial one-factor sweep improves down to k=1, but after threshold, morphology, and directional-weight tuning the kernel curve turns over at k=3. Edge threshold turns over decisively at 0.5. On deployed flip-TTA maps the new decoder exchanges DQ for SQ and is statistically indistinguishable from the previous k=7 recipe."
+      },
+      "interpretation": "Boundary search completed correctly, but do not promote: the apparent native-map gain does not survive the deployed TTA comparison."
+    },
+    {
+      "id": "E32",
+      "name": "hovernet_trained_on_our_group_disjoint_fold",
+      "status": "complete — promoted shared HoVer-Net TTA recipe",
+      "change": "Train the official CoNIC HoVer-Net architecture on our exact train/validation groups from the authors' ImageNet ResNet-50 initialization; never initialize from the public CoNIC checkpoint, which overlaps our test partition.",
+      "selection_metrics": {
+        "R2": "validation macro-R2 with per-class signed error and count-ratio audit",
+        "mPQ+": "validation pooled mPQ+ with per-class PQ audit"
+      },
+      "training_recipe": {
+        "official_hovernet_commit": "90441c092192e83b6ac6c2098f7927eb36be347c",
+        "batch_size": 6,
+        "optimizer": "Adam",
+        "phases": "50 frozen-backbone epochs followed by validation-selected unfrozen-backbone LR",
+        "loss": "NP CE+Dice, HV MSE+MSGE, TP CE+Dice",
+        "public_conic_checkpoint_used": false
+      },
+      "phase1_lr_pilot": {
+        "3e-5_epoch5": {"R2": 0.3708907, "mPQ+": 0.2787001},
+        "1e-4_epoch5": {"R2": 0.3211078, "mPQ+": 0.3429844},
+        "3e-4_epoch5": {"R2": 0.4667858, "mPQ+": 0.3343037},
+        "selection": {
+          "mPQ+": "1e-4: highest and smoothest mPQ+ trajectory",
+          "R2": "3e-4: highest pilot R2, but requires frequent validation because epoch 4 collapsed to -0.3061 before recovering"
+        }
+      },
+      "phase1_progress": {
+        "epoch20": {"learning_rate": 0.0001, "R2": 0.7442076, "mPQ+": 0.4030601},
+        "epoch25": {"learning_rate": 0.0001, "R2": 0.7171279, "mPQ+": 0.4153111},
+        "epoch30": {"learning_rate": 0.00001, "R2": 0.7712609, "mPQ+": 0.4291369},
+        "epoch50": {"learning_rate": 0.00001, "R2": 0.7966170, "mPQ+": 0.4398883},
+        "current_best": {"epoch": 50, "R2": 0.7966170, "mPQ+": 0.4398883},
+        "mechanism": "At 1e-4, PQ continued improving while epithelial/eosinophil overcount temporarily lowered R2. The scheduled 1e-5 refinement ultimately corrected those biases and improved both objectives. Epoch 50 is the shared winner; neutrophil under-detection and rare-class PQ remain the clearest class bottlenecks."
+      },
+      "artifacts": {
+        "training_curve": "outputs/conic_hovernet_our_split/full_phase1_lr1e-4/training_curve.json",
+        "diagnostic_plot": "outputs/conic_experiments/curves/e32_hovernet_phase1_diagnostics.png",
+        "locked_test_metrics": "outputs/conic_hovernet_our_split/locked_phase1_epoch50_flip_rotation_tta_test/metrics_test.json"
+      },
+      "phase2_selection": {
+        "official_1e-4": "rejected after three unstable epochs; never recovered phase-1 metrics",
+        "1e-5_best": {"epoch": 3, "R2": 0.7948497, "mPQ+": 0.4425925},
+        "3e-5_best": {"epoch": 3, "R2": 0.7794267, "mPQ+": 0.4441999},
+        "3e-5_paired_vs_phase1": {
+          "delta_R2": -0.0169605,
+          "R2_95_ci": [-0.0378701, 0.0029068],
+          "delta_mPQ+": 0.0042502,
+          "mPQ+_95_ci": [-0.0015178, 0.0102799]
+        },
+        "decision": "Do not promote phase 2: its small mPQ+ gain is uncertain and costs R2."
+      },
+      "tta_result": {
+        "transforms": ["identity", "horizontal_flip", "vertical_flip", "rotation_90", "rotation_180", "rotation_270"],
+        "validation_native": {"R2": 0.7958558, "mPQ+": 0.4401990, "mDQ+": 0.5386448, "mSQ+": 0.8034753, "bPQ": 0.6190029, "binary_DQ": 0.7657385, "binary_SQ": 0.8083737, "foreground_Jaccard": 0.6925911, "AJI+": 0.6209671, "boundary_F1_2px": 0.8808957},
+        "validation_tta": {"R2": 0.8319967, "mPQ+": 0.4695030, "mDQ+": 0.5694296, "mSQ+": 0.8105663, "bPQ": 0.6522020, "binary_DQ": 0.7998622, "binary_SQ": 0.8153929, "foreground_Jaccard": 0.7208604, "AJI+": 0.6574726, "boundary_F1_2px": 0.9017112},
+        "paired_delta_95_ci": {"R2": [0.0240907, 0.0503425], "mPQ+": [0.0242852, 0.0343574]},
+        "test": {"R2": 0.8153874, "mPQ+": 0.4372746},
+        "mechanism": "Every class improves in both validation R2 and PQ. The typed gain is DQ-led (mDQ+ +0.03078 versus mSQ+ +0.00709), and class-agnostic bPQ shows the same pattern (binary DQ +0.03412 versus binary SQ +0.00702). AJI+ and boundary F1 also improve, but detection/separation rather than contour polish is the dominant lever."
+      },
+      "guardrail": "R2 and mPQ+ were selected only on validation. Test was evaluated once after phase, checkpoint, and TTA choices were locked."
+    },
+    {
+      "id": "E33",
+      "name": "hovernet_tta_cellvit_count_blend",
+      "status": "complete — promoted R2 recipe",
+      "change": "Retain E32 HoVer-Net TTA masks/types and blend its patch counts with E28 independently per class using validation-only convex weights.",
+      "selection_metric": "per-class validation R2 on a 0.05 alpha grid; test labels untouched until the six weights were locked",
+      "selected_hovernet_weights": {
+        "neutrophil": 1.0,
+        "epithelial": 0.25,
+        "lymphocyte": 0.75,
+        "plasma": 0.9,
+        "eosinophil": 0.55,
+        "connective": 0.5
+      },
+      "validation": {"R2": 0.8644410, "mPQ+": 0.4695030},
+      "group_disjoint_oof_validation": {
+        "R2": 0.8512005,
+        "delta_vs_hovernet_tta": 0.0192038,
+        "paired_95_ci": [0.0077811, 0.0325187]
+      },
+      "test": {"R2": 0.8456295, "mPQ+": 0.4372746},
+      "delta_test_vs_previous_best": {"R2": 0.1136299, "mPQ+": 0.1041835},
+      "zero_truth_epithelial_audit": {
+        "development_validation": {"set": "47 DPath validation patches with zero epithelial ground truth", "E33_predicted_at_least_10": 16, "raw_hovernet_predicted_at_least_10": 3, "E33_mean_predicted": 7.872340425531915, "raw_hovernet_mean_predicted": 2.5531914893617023},
+        "retrospective_locked_test_description": {"set": "26 DPath internal-test patches with zero epithelial ground truth", "E33_predicted_at_least_10": 8, "raw_hovernet_predicted_at_least_10": 7, "E33_mean_predicted": 4.884615384615385, "raw_hovernet_mean_predicted": 12.038461538461538},
+        "visual_mechanism": "Aligned locked-test overlays show two separable mechanisms: HoVer-Net sometimes assigns epithelial type to well-delineated elongated connective nuclei, especially DPath-47; E33 can suppress that type-count error, but on other crops its CellViT-derived count branch adds epithelial counts that are absent from the retained HoVer-Net mask/type overlay.",
+        "selection_use": "Only the development-validation observation may shape E46. The locked-test observation is descriptive and may not be used to choose a new recipe.",
+        "real_data_gate_verification": {
+          "evaluation_set": "711-patch source-group-disjoint development validation",
+          "E32_R2": 0.8319967256620346,
+          "E33_R2": 0.8644409850065905,
+          "standalone_E33_true_zero_gate_passes": false,
+          "violating_supported_strata": 3,
+          "worst_stratum": {"name": "DPath / epithelial truth=0", "support": 47, "delta_over_10_fraction": 0.2553191489361702, "delta_over_20_fraction": 0.1702127659574468, "support_aware_tolerance": 0.0425531914893617},
+          "leave_one_source_out_E32_E33_remix_R2": 0.8636296116296033,
+          "leave_one_source_out_true_zero_gate_passes": true,
+          "leave_one_source_out_composition_advances": false,
+          "interpretation": "The gate catches the visually verified source×class failure without indiscriminately rejecting a source-held-out remix. The remix is not promoted because it does not improve over E33, not because of a false tail alarm. E33 remains the leaderboard-R2 baseline with a documented reliability caveat; future count recipes must beat it without recreating the tail."
+        }
+      },
+      "interpretation": "The OOF estimate closely predicts locked-test R2. Epithelial, plasma, and connective blending transfers strongly; eosinophil blending does not, but the locked recipe is not revised using test labels. mPQ+ is unchanged because masks/types remain E32. A later validation audit exposes a tradeoff hidden by macro R2: E33 materially increases large epithelial false counts on DPath patches with zero epithelial truth. Future R2 compositions therefore require source×class true-zero outlier-prevalence gates, not only mean error and pooled R2."
+    },
+    {
+      "id": "E34",
+      "name": "nested_source_density_count_stacker",
+      "status": "complete — rejected before test",
+      "change": "Replace E33's six constant convex weights with per-class ridge stacking over HoVer-Net/CellViT counts, source metadata, and bounded quadratic count features.",
+      "selection_metric": "nested source-group-disjoint validation R2; feature family and ridge alpha selected inside every outer fold",
+      "feature_families": ["global linear", "global quadratic", "source linear", "source quadratic"],
+      "result": {
+        "nested_oof_R2": 0.8202691,
+        "E33_group_disjoint_oof_R2": 0.8512005,
+        "delta_vs_E33": -0.0309315,
+        "paired_95_ci": [-0.0453884, -0.0170328],
+        "probability_E34_better": 0.0,
+        "test_evaluated": false
+      },
+      "interpretation": "Extra source/density flexibility overfits fold-specific count tails and hurts four of six classes. Retain the transparent convex E33 blend; pursue variance reduction through independent vision models rather than a more flexible count calibrator."
+    },
+    {
+      "id": "E35",
+      "name": "group_disjoint_hovernet_multifit_ensemble",
+      "status": "cancelled after fold 1; cross-validation-fold ensemble was not the intended heterogeneous ensemble",
+      "change": "Train independent leakage-free HoVer-Net fits across six development folds and ensemble NP/TP probabilities plus exactly inverted HV maps before one decoder pass.",
+      "selection_metric": "fold-local validation R2 and mPQ+ with the E32-selected LR 1e-4 and 50-epoch schedule; uniform ensemble recipe locked before test",
+      "fold_policy": "fold 0 exactly preserves the original validation split; original training source groups are balanced across folds 1-5; every fold contains every institution; locked test is excluded",
+      "artifacts": {
+        "fold_manifest": "outputs/conic_hovernet_folds/manifest.json",
+        "fold_1_run": "outputs/conic_hovernet_folds/fold_1_phase1_lr1e-4"
+      },
+      "interpretation": "Fold 1 completed and fold 2 was stopped after epoch 1. Preserve these artifacts for diagnostics only; fixed train/validation/test experiments and heterogeneous model families remain the selection path."
+    },
+    {
+      "id": "E36",
+      "name": "hovernet_hed_stain_augmentation",
+      "status": "fixed-strength empirical H&E augmentation rejected for both primary metrics on exact seed-205 matched development validation",
+      "change": "Move each training patch toward a source-balanced empirical joint H/E concentration pair sampled from that fold's training patches, on top of the official HoVer-Net color/blur/noise recipe.",
+      "selection_metric": "matched group-disjoint validation R2 and mPQ+; LR selected from a bounded pilot before the full horizon",
+      "planned_lr_grid": [0.00003, 0.0001, 0.0003],
+      "pilot_policy": "Run equal 10-epoch horizons at 3e-5, 1e-4, and 3e-4 with a shared seed; select mPQ+ and R2 learning rates/checkpoints independently on fold-0 validation, then pause before full-horizon promotion.",
+      "pilot_result": {
+        "evaluation_set": "711-patch source-group-disjoint development validation",
+        "selected_R2": {"learning_rate": 0.0003, "epoch": 5, "R2": 0.5720507, "mPQ+": 0.3469635},
+        "selected_mPQ+": {"learning_rate": 0.0003, "epoch": 10, "mPQ+": 0.3806954, "R2": 0.4573013},
+        "interpretation": "The intervention-side LR optimum is 3e-4 for both endpoints. The completed exact seed-205 no-H&E grid shows that these absolute scores do not translate into a useful standalone augmentation effect."
+      },
+      "matched_control_interim": {
+        "evaluation_set": "711-patch source-group-disjoint development validation",
+        "learning_rate": 0.00003,
+        "epoch": 10,
+        "candidate_R2": 0.2311200694053761,
+        "control_R2": -0.5905521725973814,
+        "delta_R2": 0.8216722420027575,
+        "candidate_mPQ+": 0.3200752745465116,
+        "control_mPQ+": 0.3208588516206779,
+        "delta_mPQ+": -0.0007835770741663,
+        "eosinophil_R2_candidate_control": [
+          -0.6333110303957179,
+          -5.940250430128083
+        ],
+        "interpretation": "Preliminary same-seed, same-LR, same-epoch evidence only. The large macro-R2 delta is predominantly prevention of an eosinophil-class collapse in the control, not a broad class-wise gain; mPQ+ is essentially unchanged and slightly lower. Wait for the full LR grid and diagnostic backfill before promotion."
+      },
+      "matched_control_interim_promising_checkpoint": {
+        "evaluation_set": "711-patch source-group-disjoint development validation",
+        "learning_rate": 0.0001,
+        "epoch": 5,
+        "candidate_R2": 0.5267434531482152,
+        "control_R2": 0.4353394343976113,
+        "delta_R2": 0.09140401875060394,
+        "candidate_mPQ+": 0.34084371834943467,
+        "control_mPQ+": 0.32202602160122423,
+        "delta_mPQ+": 0.018817696748210433,
+        "delta_mDQ+": 0.021264256822452476,
+        "delta_mSQ+": 0.008266171501157937,
+        "delta_mean_signed_error": -0.07688701359587435,
+        "delta_MAE": -0.948429442100327,
+        "delta_per_class_R2": {
+          "neutrophil": -0.015068846636643207,
+          "epithelial": 0.051454917221228746,
+          "lymphocyte": 0.04247182581244957,
+          "plasma": 0.3405871872290618,
+          "eosinophil": -0.07173580577327465,
+          "connective": 0.20071483465080175
+        },
+        "delta_per_class_PQ": {
+          "neutrophil": 0.017856932873806325,
+          "epithelial": 0.0076405625400819965,
+          "lymphocyte": -0.009730431080294477,
+          "plasma": 0.12840560892374803,
+          "eosinophil": -0.033935301993287356,
+          "connective": 0.0026688092252080686
+        },
+        "typed_instance_shift": {
+          "plasma_delta_TP": 1404,
+          "lymphocyte_delta_TP": -1299,
+          "plasma_delta_DQ": 0.15456920964420412,
+          "plasma_delta_SQ": -0.009961642483061639,
+          "plasma_signed_error_control_candidate": [
+            -3.8551336146272854,
+            0.3136427566807314
+          ],
+          "lymphocyte_signed_error_control_candidate": [
+            5.8073136427566805,
+            1.8129395218002813
+          ],
+          "interpretation": "Consistent with a lymphocyte/plasma typing correction rather than contour improvement, but source-level confusion backfill is required before causal interpretation."
+        },
+        "interpretation": "Promising same-seed, same-LR, same-epoch checkpoint: both official endpoints and both PQ components improve, four of six class R2 values improve, mean signed bias is essentially stable, and MAE falls. Plasma dominates the mPQ+ gain while eosinophil PQ regresses, so this is not a rare-class solution. Epoch 10, LR 3e-4, complete tail metrics, and boundary confirmation remain required before promotion."
+      },
+      "matched_control_lr_1e-4_turnover": {
+        "evaluation_set": "711-patch source-group-disjoint development validation",
+        "learning_rate": 0.0001,
+        "epoch": 10,
+        "candidate_R2": 0.5510688503595569,
+        "control_R2": 0.5925477682087941,
+        "delta_R2": -0.041478917849237185,
+        "candidate_mPQ+": 0.3694268931163391,
+        "control_mPQ+": 0.3751024402127796,
+        "delta_mPQ+": -0.005675547096440525,
+        "delta_mDQ+": -0.004561860610613533,
+        "delta_mSQ+": -0.009267734222659252,
+        "delta_mean_signed_error": 0.47421472105016393,
+        "delta_MAE": -0.17979371776840125,
+        "neutrophil_delta_R2": -0.3443363639338216,
+        "neutrophil_delta_PQ": -0.059395638503900644,
+        "interpretation": "The epoch-5 advantage is not durable through epoch 10 at this LR. H&E loses both official endpoints and both PQ components, primarily through neutrophil regression, despite slightly lower MAE. Treat H&E as a possible early-optimization accelerator requiring dense checkpoint confirmation and a mature-schedule transfer test, not as a proven long-horizon regularizer."
+      },
+      "metric_specific_decision": {
+        "evaluation_set": "711-patch source-group-disjoint development validation",
+        "R2": {
+          "status": "rejected as standalone recipe",
+          "candidate_grid_maximum": 0.5720506865157994,
+          "control_grid_maximum": 0.6321888954019833,
+          "independently_selected_delta": -0.06013820888618393,
+          "reason": "The completed H&E grid maximum is below the exact seed-matched clean grid maximum. The early paired gains turn over by epoch 10 and are concentrated in unstable rare-class SSE terms rather than broad count improvement."
+        },
+        "mPQ+": {
+          "status": "rejected as standalone recipe",
+          "candidate_grid_maximum": 0.3806954491687427,
+          "control_grid_maximum": 0.37897058860058674,
+          "independently_selected_delta": 0.0017248605681559614,
+          "delta_mDQ+": 0.0010954746520766,
+          "delta_mSQ+": 0.005169224550338636,
+          "reason": "The 0.00172 macro gain is too small and occurs at the LR and horizon boundary. It is entirely explained by neutrophil PQ +0.02810 while epithelial, lymphocyte, plasma, and eosinophil PQ regress; eosinophil R2 falls by 1.01714. This is an unstable rare-class trade rather than broad stain robustness."
+        }
+      },
+      "matched_control_final": {
+        "evaluation_set": "711-patch source-group-disjoint development validation",
+        "candidate_selected_mPQ_learning_rate": 0.0003,
+        "candidate_selected_mPQ_epoch": 10,
+        "candidate_R2": 0.4573012902658111,
+        "control_R2": 0.6321888954019833,
+        "candidate_mPQ+": 0.3806954491687427,
+        "control_mPQ+": 0.37897058860058674,
+        "delta_mPQ+": 0.0017248605681559614,
+        "delta_mDQ+": 0.0010954746520766,
+        "delta_mSQ+": 0.005169224550338636,
+        "delta_per_class_PQ": {
+          "neutrophil": 0.028102000064910704,
+          "epithelial": -0.0034119514343073365,
+          "lymphocyte": -0.002488444451685834,
+          "plasma": -0.002795394692799713,
+          "eosinophil": -0.009337536794757045,
+          "connective": 0.000280490717574855
+        },
+        "delta_per_class_R2": {
+          "neutrophil": 0.0015861943828044955,
+          "epithelial": -0.0494970619515529,
+          "lymphocyte": -0.02467664345602627,
+          "plasma": 0.05679788286830123,
+          "eosinophil": -1.0171382144905372,
+          "connective": -0.01639778817002302
+        },
+        "interpretation": "The only nominal endpoint win is a 0.00172 mPQ+ boundary result driven entirely by neutrophil; it does not survive a class-breadth or dual-metric sanity check. Do not include fixed-strength H&E in the best combination."
+      },
+      "conditional_follow_up": {
+        "priority": "low; do not delay the main queue",
+        "hypothesis": "A half-dose or epoch-annealed empirical H&E schedule could retain early optimization benefits without the late rare-class turnover.",
+        "gate": "Run only as a separate future family with its own exact clean and fixed-dose controls, dense validation scoring, and no changes to active queue semantics."
+      },
+      "matched_control_upper_lr_epoch5": {
+        "evaluation_set": "711-patch source-group-disjoint development validation",
+        "learning_rate": 0.0003,
+        "epoch": 5,
+        "delta_R2": 0.15678614119049572,
+        "delta_mPQ+": -0.004414220704998861,
+        "delta_mDQ+": -0.002035736595812354,
+        "delta_mSQ+": -0.01650981905745308,
+        "delta_mean_signed_error": 0.2695733708391934,
+        "delta_MAE": 0.08110642287857406,
+        "eosinophil_delta_R2": 0.7407665838271842,
+        "plasma_delta_R2": 0.1614220511348079,
+        "interpretation": "The large paired R2 effect is mostly eosinophil (about 79% of the macro delta) plus plasma, while mPQ+, both PQ components, MAE, and signed bias regress. It is a metric-specific rare-class SSE stabilization, not a balanced gain, and does not change the independently selected R2 rejection."
+      },
+      "rng_pairing_audit": {
+        "protocol": "Each candidate is launched in a fresh process, matching the production queue.",
+        "clean_repeat_sha256": "803a10be",
+        "hed_private_rng_identity_transform_sha256": "803a10be",
+        "result": "paired official imgaug stream confirmed; explicit global reseeding would change the historical stream and is intentionally not introduced"
+      },
+      "locked_transform": {
+        "probability": 0.8,
+        "target_distribution": "observed joint patch-p95 H/E pairs from the current training fold only, with institutions sampled uniformly",
+        "target_jitter": 0.05,
+        "robust_tail_expansion": 0.1,
+        "transfer_strength": [0.25, 1.0],
+        "per_channel_scale_bounds": [0.5, 2.0],
+        "reason": "Real joint pairs preserve multimodality and H/E correlation. Fold-local targets avoid validation leakage; small jitter extends support without fitting a Gaussian or inventing implausible independent H/E combinations."
+      },
+      "safety_audit": {
+        "source_stratified_variants": 500,
+        "minimum_contrast_ratio": 0.6542353,
+        "maximum_absolute_luminance_shift": 0.1603009,
+        "maximum_green_fraction": 0.0,
+        "guard_rejection_fraction": 0.002,
+        "moved_toward_target_fraction": 0.998,
+        "median_target_log_distance_before_after": [0.9481980, 0.4512483],
+        "input_source_accuracy_from_HE_before_after": [0.68, 0.542],
+        "passed": true
+      },
+      "artifacts": {
+        "visual_grid": "outputs/conic_experiments/curves/e36_hovernet_hed_examples.png",
+        "concentration_plot": "outputs/conic_experiments/curves/e36_hed_concentration_distribution.png",
+        "concentration_profile": "outputs/conic_experiments/e36_hed_concentrations.npz",
+        "concentration_report": "outputs/conic_experiments/e36_hed_concentration_report.json",
+        "safety_report": "outputs/conic_experiments/e36_hed_safety_audit.json",
+        "matched_control_live_plot": "outputs/conic_experiments/curves/e36_no_hed_control_lr_live.png",
+        "paired_grid_audit": "outputs/conic_experiment_audits/e36_hed_vs_matched_control.json",
+        "paired_grid_plot": "outputs/conic_experiments/curves/e36_hed_vs_matched_control.png",
+        "queued_selected_checkpoint_backfill": "outputs/conic_validation_diagnostic_backfill/backfill_complete.json"
+      },
+      "guardrail": "Audit per-source and neutrophil/eosinophil DQ, not pooled metrics alone; reject green-channel artifacts and any apparent PQ gain driven by rare-cell recall collapse."
+    },
+    {
+      "id": "E37",
+      "name": "hovernet_source_and_class_sampling",
+      "status": "complete — class-0.5 promoted to mPQ-specific intensity refinement; source-0.5 rejected; R2 boundary expansion required before any promotion",
+      "change": "Use replacement sampling with explicit uniform/source/class mass fractions; test source balancing alone before adding minority-class mass.",
+      "selection_metric": "matched group-disjoint validation R2 and mPQ+ with per-source and per-class DQ/SQ; LR selected independently",
+      "planned_sequence": [
+        "source fraction 0.5 LR pilot at 3e-5, 1e-4, and 3e-4 over matched 10-epoch horizons",
+        "class fraction 0.5 LR pilot on the same grid/seed as the rare-class comparator",
+        "no-sampling seed-206 control on the same LR grid, horizon, split, and optimizer-step budget",
+        "source fraction 0.5, class fraction 0.0",
+        "source fraction 0.25, class fraction 0.25 only if source-only passes",
+        "source fraction 0.0, class fraction 0.5 as the isolated rare-class comparator"
+      ],
+      "sampling_audit": {
+        "source_0.5": {"expected_unique_fraction": 0.5658150, "ESS_fraction": 0.4579535},
+        "class_0.5": {"expected_unique_fraction": 0.5968394, "ESS_fraction": 0.7908334},
+        "source_0.25_class_0.25": {"expected_unique_fraction": 0.5959918, "ESS_fraction": 0.7335876},
+        "realized_epoch_logging": "Future curve rows record a SHA-256 fingerprint of the ordered patch draws, actual unique fraction, source draw mass, class-positive patch fraction, nucleus-class fraction, and mean nuclei per draw.",
+        "interpretation": "Source balancing strongly raises CoNSeP/PanNuke representation but does not raise neutrophil/eosinophil exposure; class weighting does. Replacement sampling spends 40-43% of each nominal epoch on duplicates, so compare by optimizer steps and report unique coverage rather than calling the patch budget equivalent."
+      },
+      "resume_integrity_audit": {
+        "invalidated_attempt": "The first class-0.5 LR 3e-5 attempt resumed from a legacy checkpoint that lacked the DataLoader/WeightedRandomSampler generator state, replaying the epoch-1 draw sequence in epoch 2. It is archived as lr_3e-5_resume_rng_bug_archive and excluded from every comparison.",
+        "worker_rng_finding": "Persistent data-loader workers retain augmentation RNG inside worker processes, which cannot be reconstructed exactly from a parent checkpoint. A second clean two-epoch partial was therefore stopped and archived rather than resumed or mixed with a new loader policy.",
+        "repair": "The original persistent-worker protocol is preserved for matched E36/E37/E41/E42/E44 comparisons but now forbids resume and requires an epoch-0 restart after interruption. A separate epoch-reseed policy checkpoints sampler, train-worker, and validation-worker generators and is exactly resumable for future experiment families. Ordered draw-sequence SHA-256 fingerprints make patch replay directly auditable.",
+        "restart_policy": "Class-0.5 LR 3e-5 restarts from epoch 0 under the same persistent-worker protocol as the completed source pilot. Epoch-1 and epoch-2 draw fingerprints must differ, and any further interruption restarts the candidate rather than resuming it."
+      },
+      "lr_pairing_audit": {
+        "class_0.5_common_epochs_checked": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+        "ordered_draw_hashes_match_across_all_three_learning_rates": true,
+        "scope": "This proves identical ordered sampled patch IDs for the checked epochs and rules out an easier sampler sequence for either LR. It does not fingerprint private augmentation RNG inside persistent workers, so it is not a claim of bitwise-identical augmented tensors."
+      },
+      "interim_validation_observation": {
+        "evaluation_set": "711-patch source-group-disjoint development validation only",
+        "matched_seed206_lr_3e-5_epoch_5": {
+          "class_sampling": {
+            "control_R2": 0.3746855955967671,
+            "candidate_R2": 0.4283760163908661,
+            "delta_R2": 0.05369042079409897,
+            "control_mPQ+": 0.2846840625108606,
+            "candidate_mPQ+": 0.305204307946565,
+            "delta_mPQ+": 0.02052024543570441,
+            "delta_mDQ+": 0.026610861243800465,
+            "delta_mSQ+": 0.24917666110078895,
+            "delta_bPQ": 0.0022725084935463213,
+            "delta_mean_signed_error": 0.1331458040318796,
+            "delta_MAE": -0.3197374589779649,
+            "delta_absolute_error_gt_10_fraction": -0.005625879043600568,
+            "delta_absolute_error_gt_20_fraction": -0.011486169714017821,
+            "delta_per_class_R2": {
+              "neutrophil": 0.08922343403275612,
+              "epithelial": 0.14469202704900175,
+              "lymphocyte": -0.03147219192217143,
+              "plasma": 0.016275611767311182,
+              "eosinophil": 0.009061364939782157,
+              "connective": 0.09436227889791426
+            },
+            "delta_per_class_PQ": {
+              "neutrophil": 0.07271301275738536,
+              "epithelial": -0.0021454459394132375,
+              "lymphocyte": 0.015241966661210138,
+              "plasma": -0.03542650926033103,
+              "eosinophil": 0.05824122156563445,
+              "connective": 0.014497226829741083
+            },
+            "rare_TP_FP_candidate": {
+              "neutrophil": [101, 1088],
+              "eosinophil": [41, 524]
+            },
+            "rare_TP_FP_control": {
+              "neutrophil": [0, 0],
+              "eosinophil": [0, 0]
+            },
+            "interpretation": "First meaningful exact-control checkpoint. R2 improves in five classes except lymphocyte, MAE and >10/>20 tails improve modestly, and mPQ+ gains come from typed DQ plus newly emitted rare classes. Rare precision is still only 8.5%/7.3%, plasma PQ falls 0.03543, and the large mSQ+ delta is partly a zero-support artifact because the clean model has no matched rare-class TP. Promising, not promotable before epoch 10 and the full LR grid."
+          },
+          "source_sampling": {
+            "delta_R2": -0.11668345032768779,
+            "delta_mPQ+": -0.011822897231395069,
+            "delta_mDQ+": -0.014489780896449811,
+            "delta_mSQ+": 0.0007079046883383677,
+            "delta_bPQ": 0.006366933335769542,
+            "plasma_delta_R2": -0.6971498212543163,
+            "interpretation": "At this same checkpoint, source balancing improves binary geometry but loses both official endpoints through typed DQ and plasma count failure. This rejects only LR 3e-5 epoch 5, not the independently selected source recipe."
+          }
+        },
+        "matched_seed206_lr_3e-5_epoch_10": {
+          "class_sampling": {
+            "control_R2": 0.2740589664785581,
+            "candidate_R2": 0.5810538894490996,
+            "delta_R2": 0.30699492297054154,
+            "control_mPQ+": 0.33774810217719,
+            "candidate_mPQ+": 0.3633569739011347,
+            "delta_mPQ+": 0.025608871723944715,
+            "delta_mDQ+": 0.03361029220513473,
+            "delta_mSQ+": -0.004781992672062585,
+            "delta_bPQ": 0.002564034693875783,
+            "delta_mean_signed_error": 1.418893577121425,
+            "delta_MAE": 0.5534458509142057,
+            "delta_absolute_error_gt_10_fraction": 0.013361462728551321,
+            "delta_absolute_error_gt_20_fraction": 0.011486169714017808,
+            "delta_per_class_R2": {
+              "neutrophil": 0.3999853501972145,
+              "epithelial": -0.19219380886226123,
+              "lymphocyte": 0.004185776174379874,
+              "plasma": 0.243650577389533,
+              "eosinophil": 1.5494934047027338,
+              "connective": -0.1631517617783511
+            },
+            "delta_per_class_PQ": {
+              "neutrophil": 0.029213256758652398,
+              "epithelial": -0.0062602213803627516,
+              "lymphocyte": 0.0273597472073972,
+              "plasma": 0.0050835088584914034,
+              "eosinophil": 0.07839916096892738,
+              "connective": 0.019857777930562537
+            },
+            "interpretation": "The mPQ+ effect persists after the clean checkpoint emits both rare classes and is broader than at epoch 5: five class PQ values improve, primarily through DQ, with only epithelial down 0.00626. The macro-R2 effect is less broad: about 84% of the delta comes from eosinophil R2 +1.54949; neutrophil/plasma improve while epithelial/connective regress. Signed bias, MAE, and >10/>20 tails all worsen. Treat this as a promising mPQ-specific effect and a qualified macro-R2 effect, not a generally better count distribution."
+          },
+          "source_sampling": {
+            "delta_R2": -0.20131348584016567,
+            "delta_mPQ+": -0.007062586887452149,
+            "delta_mDQ+": -0.008745023134512475,
+            "delta_mSQ+": -0.002338233018598923,
+            "delta_bPQ": 0.007441026004814777,
+            "eosinophil_delta_R2": -1.5449627222328428,
+            "interpretation": "Source balancing again improves binary geometry while losing both official endpoints; the R2 loss is dominated by eosinophil collapse. This completes rejection of the low-LR source branch, while the independently selected higher-LR source recipe still awaits its matched controls."
+          }
+        },
+        "matched_seed206_lr_1e-4_epoch_5": {
+          "class_sampling": {
+            "control_R2": 0.43351498674253525,
+            "candidate_R2": 0.5632746349978355,
+            "delta_R2": 0.12975964825530023,
+            "control_mPQ+": 0.34339540673995944,
+            "candidate_mPQ+": 0.3579716008929637,
+            "delta_mPQ+": 0.014576194153004263,
+            "delta_mDQ+": 0.02012915337291321,
+            "delta_mSQ+": -0.004730083431532139,
+            "delta_mean_signed_error": -0.23206751054852326,
+            "delta_MAE": -0.5550867323019224,
+            "delta_absolute_error_gt_10_fraction": -0.014533520862634763,
+            "delta_absolute_error_gt_20_fraction": -0.02062822315986873,
+            "delta_per_class_R2": {
+              "neutrophil": 0.008063154779256454,
+              "epithelial": 0.16471112391348586,
+              "lymphocyte": -0.015516384964045504,
+              "plasma": -0.058148625238334195,
+              "eosinophil": 0.6018256547505257,
+              "connective": 0.0776229662909137
+            },
+            "delta_per_class_PQ": {
+              "neutrophil": 0.051669330704407185,
+              "epithelial": 0.0015730738218415752,
+              "lymphocyte": 0.009159418049388024,
+              "plasma": -0.013283095977653092,
+              "eosinophil": 0.03778972688465311,
+              "connective": 0.0005487114353889821
+            },
+            "interpretation": "This exact-control checkpoint is better balanced than LR 3e-5 epoch 10: both official metrics improve while MAE and >10/>20 outlier prevalence fall. Five class PQ values improve and the mPQ gain is DQ-led, but plasma PQ regresses. About 77% of macro-R2 gain still comes from eosinophil class R2; epithelial provides a second material contribution. This strengthens the mPQ-specific sampling signal without proving a generally broad count effect."
+          },
+          "source_sampling": {
+            "delta_R2": 0.028424182584505298,
+            "delta_mPQ+": -0.0014006719754534047,
+            "delta_mDQ+": -0.0012629789076753495,
+            "delta_mSQ+": -0.003007423018327793,
+            "delta_MAE": -0.09353023909985936,
+            "delta_absolute_error_gt_10_fraction": -0.008204406938584152,
+            "interpretation": "Source balancing modestly improves count fit at this checkpoint but loses typed DQ and mPQ+. It remains rejected for mPQ at LR 1e-4 epoch 5; independently selected checkpoints still await exact controls."
+          }
+        },
+        "matched_seed206_lr_1e-4_epoch_10": {
+          "class_sampling": {
+            "control_R2": 0.6162616386834925,
+            "candidate_R2": 0.5470311174945129,
+            "delta_R2": -0.06923052118897954,
+            "control_mPQ+": 0.35308269827138467,
+            "candidate_mPQ+": 0.3962113740950915,
+            "delta_mPQ+": 0.04312867582370683,
+            "delta_mDQ+": 0.053899560544126646,
+            "delta_mSQ+": -0.0037452109200111217,
+            "delta_bPQ": 0.00933858392063247,
+            "delta_mean_signed_error": 2.493202062822316,
+            "delta_MAE": 1.4739803094233475,
+            "delta_absolute_error_gt_10_fraction": 0.011486169714017835,
+            "delta_absolute_error_gt_20_fraction": 0.021800281293952187,
+            "delta_per_class_R2": {
+              "neutrophil": 0.4863007611948289,
+              "epithelial": -0.5206590493345852,
+              "lymphocyte": -0.023316125358970097,
+              "plasma": 0.06885450920822556,
+              "eosinophil": -0.44325176830433966,
+              "connective": 0.016688545460963322
+            },
+            "delta_per_class_PQ": {
+              "neutrophil": 0.10267322289891269,
+              "epithelial": 0.00009429682209605161,
+              "lymphocyte": 0.029362620683558216,
+              "plasma": -0.007416303494177878,
+              "eosinophil": 0.09963129316062266,
+              "connective": 0.03442692487122956
+            },
+            "per_source_mPQ_delta": {
+              "consep": 0.05249215345308511,
+              "crag": 0.030511926273162515,
+              "dpath": 0.05816842402139161,
+              "glas": 0.029388922554726027,
+              "pannuke": 0.002783609735047987
+            },
+            "instance_mechanism": {
+              "delta_geometry_matched": 5035,
+              "delta_spurious_prediction": 6946,
+              "neutrophil_delta_TP_FP": [142, 273],
+              "eosinophil_delta_TP_FP": [132, 246],
+              "interpretation": "Class sampling buys substantial geometric recall but emits more spurious instances. Binary PQ still rises 0.00934, proving the intervention is not merely a changed type prior; prior correction can only adjust the type/FP allocation on fixed geometry."
+            },
+            "interpretation": "This is strong metric-specific evidence for class sampling: independently selected mPQ rises 0.04313 through mDQ +0.05390 with mSQ only -0.00375, five class PQ values improve, and every source has a positive pooled mPQ delta. It is simultaneously negative for counts: R2 falls 0.06923, dominated by epithelial and eosinophil SSE, while bias, MAE, and outliers worsen. Promote only to lower-intensity and schedule validation for the mPQ recipe; do not use this endpoint for R2."
+          },
+          "source_sampling": {
+            "control_R2": 0.6162616386834925,
+            "candidate_R2": 0.48583945217779756,
+            "delta_R2": -0.13042218650569493,
+            "control_mPQ+": 0.35308269827138467,
+            "candidate_mPQ+": 0.3698591755363198,
+            "delta_mPQ+": 0.01677647726493514,
+            "delta_mDQ+": 0.026560049076611414,
+            "delta_mSQ+": -0.01152363985761895,
+            "delta_bPQ": 0.012532085773946933,
+            "delta_MAE": 0.3898265353961552,
+            "delta_absolute_error_gt_20_fraction": 0.005860290670417254,
+            "interpretation": "Source sampling raises mPQ and binary geometry at its selected mPQ checkpoint, but the gain trades away mSQ by 0.01152, exceeds the predefined SQ guardrail, regresses lymphocyte/plasma PQ, and loses R2 0.13042. It is inferior to class sampling for the mPQ objective and rejected for promotion."
+          }
+        },
+        "matched_seed206_lr_3e-4_epoch_5": {
+          "class_sampling": {
+            "delta_R2": 0.14006392356259373,
+            "delta_mPQ+": 0.008281462129184014,
+            "delta_mDQ+": 0.009908492903351718,
+            "delta_mSQ+": -0.0032649602532983657,
+            "delta_bPQ": 0.011162143121483115,
+            "delta_mean_signed_error": -0.871542428504454,
+            "delta_MAE": -1.2395686826066576,
+            "delta_absolute_error_gt_10_fraction": -0.022972339428035643,
+            "delta_absolute_error_gt_20_fraction": -0.03680262541022035,
+            "delta_per_class_R2": {"neutrophil": -0.06741326126919345, "epithelial": 0.3486778773716587, "lymphocyte": 0.022951348767730417, "plasma": 0.03500257079875635, "eosinophil": 0.36018925635633725, "connective": 0.14097574935027335},
+            "delta_per_class_PQ": {"neutrophil": 0.016762527809496164, "epithelial": 0.009743982973259402, "lymphocyte": 0.009340512694883008, "plasma": 0.00014537109616746813, "eosinophil": 0.01680475683315716, "connective": -0.003108378631859532},
+            "interpretation": "This is the broadest same-checkpoint R2 evidence so far: five classes improve, epithelial and eosinophil contribute comparably, MAE falls 1.24, and >10/>20 outliers fall 2.30/3.68 points. mPQ also improves through DQ with five positive class PQ deltas. DPath mPQ falls 0.01841 and neutrophil R2 falls 0.06741, so it is not uniformly positive. The checkpoint strengthens an early R2 case but does not select the final class-sampled R2 endpoint; epoch 10 and the independently selected control maximum remain required."
+          },
+          "source_sampling": {
+            "delta_R2": 0.11270714577008173,
+            "delta_mPQ+": -0.01273431826342103,
+            "delta_mDQ+": -0.01767205341782585,
+            "delta_mSQ+": -0.0005506024976499324,
+            "delta_bPQ": 0.013994308916171927,
+            "delta_MAE": -0.8942803563056732,
+            "interpretation": "Source sampling improves R2 and binary geometry at this early checkpoint but loses typed DQ and mPQ, including neutrophil PQ -0.06179 and negative mPQ deltas in four of five sources. It remains ineligible for the mPQ recipe; epoch 10 determines its independently selected R2 comparison."
+          }
+        },
+        "source_0.5_lr_1e-4_epoch_10": {"R2": 0.4858395, "mPQ+": 0.3698592, "mDQ+": 0.4633552, "mSQ+": 0.7861843},
+        "source_0.5_lr_3e-4_epoch_5": {"R2": 0.5829363, "mPQ+": 0.3424711, "mDQ+": 0.4201698, "mSQ+": 0.7979082},
+        "class_0.5_lr_3e-5_epoch_5": {
+          "R2": 0.4283760,
+          "mPQ+": 0.3052043,
+          "mDQ+": 0.3834165,
+          "mSQ+": 0.7790267,
+          "bPQ": 0.5272649,
+          "mean_signed_error": 2.6157993,
+          "absolute_error_gt_10_fraction": 0.1643226,
+          "interpretation": "The low-LR class sampler now emits both rare classes, but precision is only 8.5% for neutrophils (101 TP, 1,088 FP) and 7.3% for eosinophils (41 TP, 524 FP). Its count tail is overprediction-heavy: 12.1% of all class-count points exceed +10 versus 4.3% below -10. GLaS is the main source stress case (R2 -0.6326), with epithelial signed error +28.0 and connective signed error -9.5 cells per patch. This is an intervention trajectory, not a causal sampling effect or an LR-selected endpoint."
+        },
+        "class_0.5_lr_3e-5_epoch_10": {
+          "R2": 0.5810539,
+          "mPQ+": 0.3633570,
+          "mDQ+": 0.4549666,
+          "mSQ+": 0.7814517,
+          "bPQ": 0.5565450,
+          "mean_signed_error": 3.6744023,
+          "absolute_error_gt_10_fraction": 0.1729958,
+          "rare_precision": {"neutrophil": 0.2293388, "eosinophil": 0.3082707},
+          "interpretation": "From epoch 5 to 10, mPQ+ rises 0.05815 primarily through DQ (+0.07155; SQ +0.00243). Rare false positives contract sharply while true positives rise: neutrophil changes from 101 TP/1,088 FP to 111/373 and eosinophil from 41/524 to 123/276. Macro R2 rises 0.15268, but the gain is concentrated in neutrophil (+0.31658), eosinophil (+0.78230), and plasma (+0.09527) while epithelial (-0.17288) and connective (-0.12778) regress. GLaS source-level macro R2 rises 0.90420 even though GLaS epithelial R2 worsens to -0.85975 with +33.0 cells/patch bias, demonstrating how large normalized rare-class gains can hide a dominant-class failure. Mean signed error worsens from +2.62 to +3.67 and |error|>10 prevalence from 16.43% to 17.30%, so this is a promising mPQ+ trajectory but a qualified R2 candidate with a worse overcount tail. Both endpoints win at the current horizon boundary; higher learning rates remain in progress."
+        },
+        "descriptive_class_vs_source_lr_3e-5_epoch_10": {
+          "delta_R2": 0.5083084,
+          "delta_mPQ+": 0.0326715,
+          "delta_mDQ+": 0.0423553,
+          "delta_mSQ+": -0.0024438,
+          "delta_bPQ": -0.0048770,
+          "interpretation": "At the same seed, LR, epoch, and optimizer-step budget, class-aware sampling is better than source-aware sampling almost entirely through rare-class detection/typing rather than geometry: eosinophil R2 differs by +3.09446, while epithelial and connective R2 are worse and bPQ is lower. Because both arms are interventions, this describes mechanism but is not the class-sampling effect versus uniform sampling."
+        },
+        "descriptive_class_vs_source_lr_3e-4_epoch_5": {
+          "delta_R2": 0.0273568,
+          "delta_mPQ+": 0.0210158,
+          "delta_mDQ+": 0.0275805,
+          "delta_mSQ+": -0.0027144,
+          "delta_bPQ": -0.0028322,
+          "interpretation": "At the provisional R2 checkpoint, class-aware versus source-aware sampling again differs through typed DQ while binary geometry is slightly worse. Both arms are interventions, so this supports a mechanism but is not the class-sampling effect versus uniform sampling."
+        },
+        "class_0.5_lr_1e-4_epoch_5": {
+          "R2": 0.5632746,
+          "mPQ+": 0.3579716,
+          "mDQ+": 0.4447593,
+          "mSQ+": 0.7891968,
+          "bPQ": 0.5662900,
+          "mean_signed_error": 1.5011721,
+          "MAE": 5.0168776,
+          "absolute_error_gt_10_fraction": 0.1507267,
+          "interpretation": "Compared with LR 3e-5 epoch 10, this faster candidate is only -0.01778 R2 and -0.00539 mPQ+ but has better bPQ (+0.00975), SQ (+0.00775), mean signed error (+1.50 versus +3.67), MAE (5.02 versus 6.18), and |error|>10 prevalence (15.07% versus 17.30%). It favors epithelial/connective count fit while LR 3e-5 epoch 10 favors rare-class R2. This makes LR 1e-4 epoch 5 the better-balanced provisional R2 candidate, not a final selection; its epoch-10 score is pending."
+        },
+        "class_0.5_lr_1e-4_epoch_10": {
+          "R2": 0.5470311,
+          "mPQ+": 0.3962114,
+          "mDQ+": 0.4906947,
+          "mSQ+": 0.7939628,
+          "bPQ": 0.5768913,
+          "mean_signed_error": 3.6861228,
+          "MAE": 6.4057665,
+          "absolute_error_gt_10_fraction": 0.1636193,
+          "interpretation": "From epoch 5 to 10, mPQ+ gains 0.03824 through DQ (+0.04594; SQ +0.00477), with every class PQ improving. R2 loses 0.01624 and the directional tail worsens: mean signed error +2.18495, MAE +1.38889, |error|>10 +1.289 percentage points, and >+10 overcounts +2.696 points. The conflict is dominated by epithelial counts: R2 falls 0.73566 to 0.23688 and count ratio rises 1.1096x to 1.4122x as epithelial TP increases 3,865 but FP increases 8,078. This is the provisional mPQ+ checkpoint; it is not the R2 checkpoint."
+        },
+        "class_0.5_lr_3e-4_epoch_5": {
+          "R2": 0.6102930,
+          "mPQ+": 0.3634869,
+          "mDQ+": 0.4477503,
+          "mSQ+": 0.7951938,
+          "bPQ": 0.5785902,
+          "mean_signed_error": 1.5588373,
+          "MAE": 5.0131271,
+          "absolute_error_gt_10_fraction": 0.1481481,
+          "interpretation": "This is the provisional raw-R2 maximum and improves LR 1e-4 epoch 5 by +0.04702 R2 with essentially unchanged MAE, slightly fewer >10 outliers, and +0.01230 bPQ. The classwise R2 gain is concentrated in eosinophil (+0.30658), plasma (+0.07968), and lymphocyte (+0.02315), while neutrophil, epithelial, and connective regress slightly. Neutrophil count ratio is still 2.507x and precision only 14.0%, so rare precision is not solved. The LR is the upper search boundary and must be expanded only if the exact matched control shows a positive causal effect."
+        },
+        "class_0.5_lr_3e-4_epoch_10": {
+          "R2": 0.6255113,
+          "mPQ+": 0.3835281,
+          "mDQ+": 0.4727583,
+          "mSQ+": 0.7936340,
+          "bPQ": 0.5839996,
+          "mean_signed_error": 3.6643226,
+          "MAE": 6.4908579,
+          "absolute_error_gt_10_fraction": 0.1788561,
+          "absolute_error_gt_20_fraction": 0.0881388,
+          "rare_precision": {"neutrophil": 0.2424242, "eosinophil": 0.3316062},
+          "interpretation": "This is the provisional raw-R2 maximum, but the +0.01522 gain from epoch 5 is not broad: neutrophil R2 rises +0.57764 while epithelial, lymphocyte, plasma, and connective all regress. mPQ+ rises +0.02004 through DQ (+0.02501; SQ -0.00156), and every class PQ improves, but mean signed error worsens +2.11 cells, MAE +1.48, |error|>10 +3.07 points, and |error|>20 +3.28 points. Epithelial signed error is +17.57 cells/patch (1.373x GT). This is the metric-selected R2 checkpoint, not evidence of a broadly safer model; both LR and epoch are search boundaries, and expansion is conditional on a positive exact-control effect."
+        },
+        "provisional_class_0.5_metric_specific_selection": {
+          "R2_raw_maximum": {"learning_rate": 0.0003, "epoch": 10, "R2": 0.6255113, "mPQ+": 0.3835281, "mean_signed_error": 3.6643226, "absolute_error_gt_10_fraction": 0.1788561, "boundary_warning": "upper LR and scored-horizon boundaries; expand only after a positive matched-control effect; gain over epoch 5 is neutrophil-dominated and worsens tails"},
+          "R2_lower_tail_alternative": {"learning_rate": 0.0003, "epoch": 5, "R2": 0.6102930, "mPQ+": 0.3634869, "mean_signed_error": 1.5588373, "absolute_error_gt_10_fraction": 0.1481481},
+          "mPQ+": {"learning_rate": 0.0001, "epoch": 10, "mPQ+": 0.3962114, "R2": 0.5470311, "mDQ+": 0.4906947, "mSQ+": 0.7939628},
+          "status": "full three-LR intervention sweep complete; provisional until exact seed-206 no-sampling control completes"
+        },
+        "independently_selected_source_0.5": {
+          "R2": {"learning_rate": 0.0003, "epoch": 5, "R2": 0.5829363, "mPQ+": 0.3424711, "boundary_gate": "upper LR boundary; expand only if the matched causal effect passes"},
+          "mPQ+": {"learning_rate": 0.0001, "epoch": 10, "mPQ+": 0.3698592, "R2": 0.4858395, "mDQ+": 0.4633552, "mSQ+": 0.7861843, "boundary_gate": "interior LR but latest scored epoch; extend horizon only if the matched causal effect passes"}
+        },
+        "directional_error": {"mean_signed_error": 2.300516, "MAE": 5.321613, "absolute_error_gt_10_fraction": 0.151430},
+        "trajectory_interpretation": "At LR 1e-4 from epoch 5 to 10, mPQ+ rose through DQ (+0.03999) while SQ fell slightly (-0.00474); R2 rose +0.02390 through a GLaS/eosinophil gain offset by DPath rare-class regressions. At LR 3e-4, epoch 5 is the R2 optimum; continuing to epoch 10 adds +0.02066 mPQ+ through DQ (+0.02912, SQ -0.00558) but loses -0.11179 R2, driven mainly by CRAG/DPath/GLaS eosinophil SSE. At epoch 5, LR 3e-4 improves R2 versus LR 1e-4 but |error|>10 prevalence slightly worsens (0.15706 to 0.15987): fewer over-count tails but more under-count tails. These are LR trajectory observations, not a causal source-balancing effect.",
+        "attribution_status": "Do not compare against another seed or E32. The exact seed-206 no-sampling control is pending. The descriptive class-versus-source difference at LR 3e-5 epoch 5 is not a causal ablation because both arms are interventions."
+      },
+      "interpretation": "The exact seed-206 three-LR control grid is complete on the 711-patch development validation set. Class-0.5 is a strong mPQ-specific result: independently validation-selected mPQ/mDQ/mSQ deltas are +0.04101/+0.05285/-0.00450, and at its selected LR 1e-4 epoch 10 the exact same-checkpoint deltas are +0.04313/+0.05390/-0.00375. Five class PQ values and every source-level pooled mPQ improve; binary PQ also rises +0.00934. The mechanism is aggressive recall: geometry matches rise 5,035 but spurious predictions rise 6,946. GLaS gains +0.02939 pooled mPQ while losing 0.02180 mSQ and increasing the >20-error proportion by 6.94 percentage points. Its independently selected R2 gain is only +0.00925 (0.62551 versus 0.61626), selected on the upper LR and horizon boundaries and accompanied by worse bias, MAE, and outlier prevalence; it requires boundary expansion and is not promoted. Source-0.5 loses independently selected R2 0.03333; its mPQ gain +0.01465 trades away mSQ 0.01227 and fails the guardrail. Class sampling advances to E45 lower fractions, early-heavy scheduling, and validation-only sampler-prior correction for mPQ; source sampling is rejected.",
+      "conditional_next_steps": {
+        "weaker_class_sampling": "Triggered as E45: class-only fractions 0.25 and 0.10 each receive a full three-LR bracket and denser two-epoch validation scoring after the current serialized model/loss pilots. The goal is to retain rare-class DQ while recovering unique-patch coverage and reducing epithelial/common-class overcount.",
+        "mature_schedule": "Promote only the validation-selected sampling fraction/LR. Compare fixed sampling with an early-heavy schedule that returns to uniform draws, because pilot gains may reflect faster rare-class learning rather than a better late optimum.",
+        "metric_specific_combination": "For mPQ+, retain the class-sampled HoVer masks/types if they survive mature validation. For R2, independently validation-select a count blend against the existing E28/CellViT count stream while leaving those masks unchanged, mirroring E33's successful decoupling.",
+        "redundancy_guard": "Do not automatically combine class sampling with E44 focal/class-weighted type loss; first compare their per-class DQ/confusion signatures because both may act on the same rare-class gradient imbalance."
+      },
+      "sampler_prior_correction": {
+        "scope": "Validation-only correction of the known replacement-sampler prior back toward the natural development-training nucleus prior; no validation/test labels estimate either prior and geometry is fixed.",
+        "natural_uniform_prior": {"neutrophil": 0.0077579, "epithelial": 0.4931827, "lymphocyte": 0.2208223, "plasma": 0.0529165, "eosinophil": 0.0065775, "connective": 0.2187430},
+        "class_0.5_realized_prior": {"neutrophil": 0.0147874, "epithelial": 0.4228590, "lymphocyte": 0.2660143, "plasma": 0.0649224, "eosinophil": 0.0106644, "connective": 0.2207525},
+        "strengths": [0.0, 0.25, 0.5, 0.75, 1.0],
+        "isolation": "Report the raw decoder, pooled-instance argmax at strength 0, and prior adjustment relative to both. Promote only if the correction itself and the final endpoint improve validation.",
+        "artifact_policy": "Selected-checkpoint backfill stores per-decoded-instance six-class probabilities and keyed instance IDs; locked test patches are refused.",
+        "script": "scripts/sweep_hovernet_sampler_prior.py"
+      },
+      "artifacts": {
+        "budget_plot": "outputs/conic_experiments/curves/e37_sampling_budget.png",
+        "budget_report": "outputs/conic_experiments/e37_sampling_budget.json",
+        "class_sampling_live_plot": "outputs/conic_experiments/curves/e37_class_sampling_lr_live.png",
+        "matched_no_sampling_live_plot": "outputs/conic_experiments/curves/e37_no_sampling_control_lr_live.png",
+        "class_vs_control_audit": "outputs/conic_experiment_audits/e37_class_0.5_vs_matched_control.json",
+        "source_vs_control_audit": "outputs/conic_experiment_audits/e37_source_0.5_vs_matched_control.json"
+      },
+      "guardrail": "Compare both interventions only with the seed-206 no-sampling control; seed-205 E36 controls are not attribution-valid. These are 10-epoch no-TTA screens from ImageNet initialization and must not be compared directly with the mature 50-epoch E32 six-view-TTA score. Keep optimizer-step budget matched, disclose expected unique coverage, and reject gains that trade common-class DQ for unstable rare-class false positives. Source-only is a domain-robustness intervention, not a rare-class intervention."
+    },
+    {
+      "id": "E38",
+      "name": "deterministic_empirical_stain_tta",
+      "status": "base-model two-view gates complete — rejected; matched E36 checkpoint retest conditional on train-time augmentation passing",
+      "change": "At inference, make exactly two stain views (native plus one deterministic training-anchor H/E translation), uniformly average NP/TP probabilities and HV maps, and run the HoVer-Net decoder once.",
+      "selection_metric": "validation mPQ+ and R2 independently; compare each metric-specific two-view candidate against the matched native model before any locked-test evaluation",
+      "anchor_policy": "Define 3x3 joint H/E bins from training quantiles, score validation performance by bin with support/source composition, and choose an observed training patch nearest the selected bin's log-H/E median. Validation/test pixels never define the anchor and inference uses no jitter.",
+      "stain_space_audit": {
+        "best_mpq_bin": {"bin": "H3/E2", "n": 115, "mPQ+": 0.510876, "R2": 0.759329, "anchor_patch_id": 3127, "source_mix_note": "102/115 DPath"},
+        "best_r2_bin": {"bin": "H3/E3", "n": 86, "mPQ+": 0.455806, "R2": 0.842675, "anchor_patch_id": 2543, "source_mix_note": "75/86 DPath"},
+        "native_inference_stability": "The same H3/E2 and H3/E3 anchors are selected without spatial TTA (bin mPQ+ 0.467358 and bin R2 0.796832, respectively).",
+        "confounding_note": "The leading stain bins are DPath-dominated, so these observational rankings do not establish a stain effect. The paired two-view intervention is the causal gate."
+      },
+      "base_model_gate": {
+        "native": {"mPQ+": 0.4401990, "R2": 0.7958558, "mean_signed_error": 1.524, "MAE": 3.627, "absolute_error_gt_10_fraction": 0.0968},
+        "H3_E2_two_view": {"mPQ+": 0.4256593, "R2": 0.7871542, "delta_mPQ+": -0.0145397, "mPQ_delta_95_ci": [-0.0193954, -0.0099532], "delta_R2": -0.0087016, "R2_delta_95_ci": [-0.0224696, 0.0060709], "mean_signed_error": 2.348, "MAE": 4.333, "absolute_error_gt_10_fraction": 0.1263},
+        "H3_E3_two_view": {"mPQ+": 0.4258243, "R2": 0.7917853, "delta_mPQ+": -0.0143748, "mPQ_delta_95_ci": [-0.0184500, -0.0106324], "delta_R2": -0.0040705, "R2_delta_95_ci": [-0.0171849, 0.0111180], "mean_signed_error": 2.154, "MAE": 4.237, "absolute_error_gt_10_fraction": 0.1177},
+        "interpretation": "For the base model, deterministic stain translation significantly lowers mPQ and increases positive count bias/outlier burden, especially in CRAG/GLaS. This rejects unmatched stain TTA only; repeat native/styled/two-view inference if empirical H/E train augmentation validates."
+      },
+      "planned_sequence": [
+        "gate native + H3/E2 at 50/50 raw-map weight without spatial TTA for mPQ+",
+        "gate native + H3/E3 at 50/50 raw-map weight without spatial TTA for R2",
+        "if positive, test interaction with the locked six-transform spatial TTA",
+        "only then evaluate the separately selected mPQ+ and R2 recipes on locked test"
+      ],
+      "evidence": {
+        "Mahbod_2024": "Random train-time stain normalization plus deterministic test-time normalization improved PQ on 5 of 7 external nuclei datasets, but hurt one and multiplied inference by eight.",
+        "Xu_2022": "Test-time stain mixing improved cross-site cell detection, but the study used one dataset and required robust suppression of harmful transforms.",
+        "Scalbert_2022": "Source-domain image-translation TTA improved OOD histopathology classification, while also showing that poor projections can hurt naive averaging."
+      },
+      "artifacts": {
+        "bin_report": "outputs/conic_experiments/e38_hed_bin_performance.json",
+        "bin_plot": "outputs/conic_experiments/curves/e38_hed_bin_performance.png",
+        "native_bin_report": "outputs/conic_experiments/e38_hed_bin_performance_native.json",
+        "native_bin_plot": "outputs/conic_experiments/curves/e38_hed_bin_performance_native.png",
+        "fixed_split_summary": "outputs/conic_fixed_split/e38_summary.json"
+      },
+      "guardrail": "Treat stain TTA as nuisance marginalization, not guaranteed augmentation. The first gate is exactly two forwards without spatial TTA (12 with the locked six spatial views). Reject if gains are source-specific, if any rare-class DQ collapses, or if bootstrap uncertainty includes a practically meaningful loss; disclose the multiplier."
+    },
+    {
+      "id": "E39",
+      "name": "sixfold_uniform_hovernet_ensembles",
+      "status": "cancelled after fold 1; superseded by heterogeneous-model ensemble plan",
+      "change": "Average NP/TP probabilities and exactly aligned HV maps from six group-disjoint HoVer-Net fits before one decoder pass, using separate foldwise checkpoint choices for mPQ+ and R2.",
+      "selection_policy": "Exactly two recipes are fixed before locked-test inference: uniform foldwise best_mPQ checkpoints for the mPQ+ branch and uniform foldwise best_r2 checkpoints for the R2 branch. Each uses the locked six spatial transforms. No model subset, model weight, or result-dependent route is selected on original validation or test because folds 1-5 trained on the original validation patches.",
+      "expected_forward_passes_per_patch": 36,
+      "planned_outputs": {
+        "mpq_recipe": "outputs/conic_postfold/e39_sixfold_best_mpq_tta_test",
+        "r2_recipe": "outputs/conic_postfold/e39_sixfold_best_r2_tta_test",
+        "summary": "outputs/conic_postfold/postfold_summary.json"
+      },
+      "analysis": "Report overall and per-class mPQ+/DQ/SQ, overall and per-class R2, signed bias, outlier fractions, source breakdowns, and paired differences from E32/E33. A gain must be explained through additive PQ statistics or class-normalized SSE rather than the headline alone.",
+      "guardrail": "The original validation fold is contaminated for folds 1-5 and cannot tune ensemble membership. The cross-validation-fold ensemble was removed from the critical path; retain fold 1 only as an optional independent-fit diagnostic and do not use its partial successors.",
+      "cancellation_reason": "The intended ensemble axis is heterogeneous model types and independently validated recipes, not an ensemble of one architecture trained across cross-validation folds. These folds are not bootstrap samples and this experiment is not bagging."
+    },
+    {
+      "id": "E40",
+      "name": "hovernet_cellvit_heterogeneous_source_route",
+      "status": "validation-screened and rejected before test",
+      "change": "Select HoVer-Net E32 or the strongest CellViT++ E30 mask/type output wholesale for each known source repository using exact pooled validation mPQ+.",
+      "selection_metric": "Exact pooled validation mPQ+ over all 32 source routes; no test evaluation unless at least one source selects CellViT++ with credible support.",
+      "validation": {
+        "hovernet_endpoint": {"mPQ+": 0.4695030, "R2": 0.8319967},
+        "cellvit_endpoint": {"mPQ+": 0.3406416, "R2": 0.6840997},
+        "selected_route": {"consep": "HoVer-Net", "crag": "HoVer-Net", "dpath": "HoVer-Net", "glas": "HoVer-Net", "pannuke": "HoVer-Net"},
+        "selected_mPQ+": 0.4695030,
+        "selected_R2": 0.8319967
+      },
+      "class_source_audit": "CellViT++ improves only CoNSeP eosinophil (+0.195 PQ on tiny support) and PanNuke connective (+0.022); it is worse for every other non-tied class/source cell, usually through lower DQ. This is too sparse to justify instance-level union or a learned patch gate.",
+      "artifacts": {
+        "route_report": "outputs/conic_experiments/e40_hovernet_cellvit_source_route_val.json",
+        "cellvit_counts": "outputs/conic_experiments/e40_e30_cellvit_counts.npy"
+      },
+      "guardrail": "Do not test or promote a more flexible instance-level fusion merely because one tiny source/class cell improves. Require broad complementary validation support or a new architecture with materially different error modes."
+    },
+    {
+      "id": "E41",
+      "name": "hovernet_seresnext101_heterogeneous_backbone",
+      "status": "validation-screened — LR 1e-4 epoch 10 selected for both pilot objectives; promoted to count/type-complementarity audits, not standalone mPQ+",
+      "change": "Replace only E32's ResNet-50 encoder with an SE-ResNeXt-101 32x4d encoder while retaining the official three-branch HoVer decoder, six-term loss, split, sampling, and augmentation recipe.",
+      "selection_metric": "group-disjoint validation mPQ+ and R2 selected independently over equal 10-epoch horizons at 3e-5, 1e-4, and 3e-4; no test inference",
+      "comparison_control": "Seed-205 no-H&E ResNet-50 LR grid with matched train batch size, optimizer-step budget, validation cadence, and split.",
+      "initialization": {
+        "dataset": "ImageNet-1K only",
+        "architecture": "timm seresnext101_32x4d.gluon_in1k",
+        "checkpoint": "checkpoints/gluon_seresnext101_32x4d-cf52900d.pth",
+        "sha256": "cf52900ddbe4e889125bc3d670eeb305e080b81d5104e8981c41be00e6c3b6bd",
+        "conic_checkpoint_used": false
+      },
+      "implementation_validation": {
+        "strict_pretrained_tensor_load": true,
+        "stage_shapes_for_32px_input": [[1, 256, 32, 32], [1, 512, 16, 16], [1, 1024, 8, 8], [1, 2048, 4, 4]],
+        "output_shapes_for_32px_input": {"tp": [1, 7, 32, 32], "np": [1, 2, 32, 32], "hv": [1, 2, 32, 32]},
+        "legacy_e32_checkpoint_strict_load": true,
+        "pipeline_tests": "covered by the current 115-test pipeline/deployment suite"
+      },
+      "interim_validation_observation": {
+        "evaluation_set": "711-patch source-group-disjoint development validation · provisional E41 pilot only",
+        "latest_scored_checkpoint": {
+          "learning_rate": 0.0001,
+          "epoch": 10,
+          "R2": 0.6804273504239142,
+          "mPQ+": 0.3967359684043221,
+          "mDQ+": 0.4929425152497821,
+          "mSQ+": 0.7848670019510279
+        },
+        "exact_matched_control_delta": {
+          "R2": 0.0878796511552925,
+          "mPQ+": 0.0216342718049592,
+          "mDQ+": 0.0307670712957892,
+          "mSQ+": -0.0126439700130578
+        },
+        "independently_selected_resnet_delta": {
+          "R2": 0.0482384518553575,
+          "mPQ+": 0.0177653823311681,
+          "mDQ+": 0.0271688432317028,
+          "mSQ+": -0.0109828594072146
+        },
+        "interpretation": "The LR 1e-4 endpoint is a legitimate same-horizon count-model improvement: R2 rises by 0.0482 over the independently selected ResNet pilot while signed bias, MAE, and every reported large-error tail improve. Its mPQ+ gain is driven by typed DQ and type accuracy, however; binary geometry is slightly worse and mSQ+ falls by 0.0110, failing the predeclared 0.005 SQ guardrail. The LR 3e-4 epoch-5 score repeats the same pattern versus its exact control (+0.1713 R2, +0.0133 mPQ+, +0.0190 mDQ+, -0.0107 mSQ+) but remains below the completed LR 1e-4 endpoint. Treat E41 as a count/complementarity candidate and test fixed-geometry type blending; do not promote it as a standalone segmentation recipe before the full grid and paired analyses finish."
+      },
+      "final_validation_selection": {
+        "evaluation_set": "711-patch source-group-disjoint development validation",
+        "selected_learning_rate": 0.0001,
+        "selected_epoch": 10,
+        "R2": 0.6804273485002047,
+        "mPQ+": 0.3967359730257747,
+        "mDQ+": 0.49294251542435746,
+        "mSQ+": 0.7848670019537086,
+        "R2_delta_vs_independently_selected_resnet": 0.04823845309822139,
+        "mPQ+_delta_vs_independently_selected_resnet": 0.017765384425187936,
+        "mDQ+_delta_vs_independently_selected_resnet": 0.02716884402098524,
+        "mSQ+_delta_vs_independently_selected_resnet": -0.01098285514773456,
+        "decision": "Admit to paired count-residual and fixed-geometry type-probability screens. Reject as a standalone mPQ+ recipe because the SQ loss exceeds 0.005 and binary geometry does not improve."
+      },
+      "metric_driver_analysis": {
+        "evaluation_set": "711-patch source-group-disjoint development validation",
+        "R2": {
+          "observed_independently_selected_delta": 0.04823845309822139,
+          "reconstruction_error_from_source_class_SSE": 2.7755575615628914e-17,
+          "largest_positive_contributions": {"crag_plasma": 0.04078074649278645, "dpath_plasma": 0.017234472091717357, "crag_epithelial": 0.016024972314695893, "glas_epithelial": 0.010414093440631331},
+          "largest_negative_contributions": {"dpath_eosinophil": -0.016360797807939847, "dpath_neutrophil": -0.01606021812589609, "crag_eosinophil": -0.011830115338048813, "crag_neutrophil": -0.011125391157170816},
+          "source_macro_contributions": {"consep": 0.0008706511712536208, "crag": 0.0447089841920868, "dpath": -0.020586577030058624, "glas": 0.02233287467980049, "pannuke": 0.0009125200851391312},
+          "interpretation": "The count gain is useful but not uniform: CRAG plasma is the largest driver and DPath is net-negative. At the candidate-selected checkpoint, however, MAE falls 1.254 cells and both under- and over-count >10/>20 tails improve, so E41 remains a credible count-complementarity model subject to leave-one-source-out weights."
+        },
+        "mPQ+": {
+          "one_source_counterfactual_delta": {"dpath": 0.01416374984918406, "glas": 0.0030479145593632073, "crag": 0.0027973620955222267, "consep": 0.0005636335908014711, "pannuke": 0.00011762041050644712},
+          "matched_type_accuracy_delta": 0.033158552862102786,
+          "geometry_matched_delta": -1797,
+          "correctly_typed_delta": 605,
+          "spurious_prediction_delta": -2239,
+          "largest_swap_corrections": {"lymphocyte_to_plasma": -969, "connective_to_epithelial": -966, "epithelial_to_connective": -399},
+          "largest_new_swap": {"plasma_to_lymphocyte": 532},
+          "interpretation": "Most pooled mPQ+ benefit comes from DPath and better typing, while whole-model geometry loses matches and SQ. The candidate strongly corrects the visually observed connective→epithelial failure but creates a plasma→lymphocyte trade. Preserve ResNet geometry and blend matched-instance type probabilities; the source-excluded weight and confusion matrix decide admission."
+        }
+      },
+      "planned_gate": "For R2, require paired per-patch residual complementarity and leave-one-source-out stable class weights. For mPQ+, hold ResNet geometry fixed and validation-sweep only matched-instance type probabilities; test a pre-decoder TP blend only if that screen improves mPQ+/mDQ+ without SQ or source-stability failure.",
+      "artifacts": {
+        "pilot_summary": "outputs/conic_backbone_pilots/e41_seresnext101_summary.json",
+        "pilot_root": "outputs/conic_backbone_pilots/e41_seresnext101",
+        "live_curve": "outputs/conic_experiments/curves/e41_seresnext101_lr_live.png",
+        "matched_analysis": "outputs/conic_experiments/e41_seresnext101_vs_resnet50.json",
+        "matched_analysis_plot": "outputs/conic_experiments/curves/e41_seresnext101_vs_resnet50.png"
+      },
+      "guardrail": "The released Pathology-AI CoNIC checkpoints are never loaded. Isolate backbone diversity before testing their decoder dropout; keep internal test retrospective-only and do not use its scores for blend membership or weights."
+    },
+    {
+      "id": "E42",
+      "name": "hovernet_instance_equalized_loss_mass",
+      "status": "complete — rejected for both metrics; no capped variant or mature run",
+      "change": "Blend ordinary per-pixel NP/TP cross-entropy and HV MSE/gradient loss toward equal total foreground loss mass per ground-truth nucleus, while preserving total foreground mass and leaving Dice terms unchanged.",
+      "selection_metric": "group-disjoint development-validation mPQ+ and R2 selected independently over a bounded learning-rate and blend grid",
+      "planned_grid": {
+        "stage_A": "instance-loss blend 0.5 at learning rates 3e-5, 1e-4, and 3e-4; select R2 and mPQ+ learning rates independently",
+        "stage_B": "instance-loss blends 0.25 and 1.0 at the union of stage-A endpoint-selected learning rates",
+        "control": "same seed, horizon, split, and optimizer-step budget with instance_loss_blend=0"
+      },
+      "hypothesis": "CoNIC DQ gives each nucleus one opportunity to become TP, FP, or FN, whereas pixel losses let large nuclei dominate foreground gradients. Equalizing foreground loss mass by instance may improve small-cell detection and typing without inventing a non-differentiable watershed surrogate.",
+      "interim_validation_observation": {
+        "evaluation_set": "711-patch source-group-disjoint development validation · complete staged grid",
+        "candidate": {"instance_loss_blend": 0.5, "learning_rate": 0.0001, "epoch": 10, "R2": 0.594744394033461, "mPQ+": 0.3685506054522723, "mDQ+": 0.45499351000376126, "mSQ+": 0.7877963070304421},
+        "exact_matched_control": {"R2": 0.5925477682087941, "mPQ+": 0.3751024402127796, "mDQ+": 0.4621752817974869, "mSQ+": 0.7975105202437073},
+        "exact_matched_control_delta": {"R2": 0.0021966258246669534, "mPQ+": -0.006551834760507302, "mDQ+": -0.007181771793725644, "mSQ+": -0.009714213213265155, "binary_DQ": -0.00439725688632564, "binary_SQ": -0.0008347018556954522, "binary_PQ": -0.004114039877231801, "AJI+": -0.004888575888560842},
+        "independently_selected_ordinary_loss": {"R2": 0.6321888954019833, "mPQ+": 0.37897058860058674},
+        "delta_vs_independently_selected_ordinary_loss": {"R2": -0.03744450136852229, "mPQ+": -0.010419983148314438},
+        "count_error_delta": {"mean_signed_error": 0.09212376933895916, "MAE": -0.266526019690577, "absolute_error_gt_2_fraction": -0.017112048757618348, "absolute_error_gt_5_fraction": -0.011954992967651179, "absolute_error_gt_10_fraction": -0.0051570557899671965, "absolute_error_gt_20_fraction": -0.005391467416783868},
+        "mechanism_audit": {"plasma_PQ_delta": 0.013753762690610016, "lymphocyte_PQ_delta": 0.017117482325589073, "neutrophil_PQ_delta": -0.05366283334726034, "eosinophil_PQ_delta": -0.006322646745563404, "geometry_matched_nuclei_delta": -161, "correctly_typed_nuclei_delta": 419, "matched_type_accuracy_delta": 0.008672620151360944, "spurious_prediction_delta": 633, "source_mPQ+_deltas": {"consep_n12": 0.014207629217201312, "crag_n360": -0.002264038914916, "dpath_n219": -0.00919554032314629, "glas_n108": -0.018652195506944413, "pannuke_n12": -0.021036656020636757}},
+        "transient_epoch5_signal": {"mPQ+_delta": 0.008547069745722002, "mDQ+_delta": 0.008271140291501111, "mSQ+_delta": 0.009576742106046643, "binary_DQ_delta": -0.0036343737385717834, "interpretation": "The apparent macro typed-PQ gain at epoch 5 turned negative by epoch 10 and is not eligible for selection."},
+        "completed_high_lr_endpoint": {"learning_rate": 0.0003, "epoch": 10, "R2": 0.09492850835395177, "mPQ+": 0.36452018308191875, "mDQ+": 0.4481643675434017, "mSQ+": 0.7990928508587, "exact_control_delta": {"R2": -0.5372603870480316, "mPQ+": -0.014450405518667997, "mDQ+": -0.017609303859970504, "mSQ+": 0.0032429937572567846, "binary_DQ": -0.003046907894399653, "binary_PQ": -0.002699350628274977, "AJI+": -0.004945544378242905, "boundary_F1": 0.0005365101160186292}, "count_error_delta": {"mean_signed_error": 0.27988748241912775, "MAE": 0.7252695733708396, "absolute_error_gt_10_fraction": 0.022972339428035643, "absolute_error_gt_20_fraction": 0.00867323019221753, "under_error_lt_minus_10_fraction": 0.007969995311767467, "over_error_gt_10_fraction": 0.015002344116268176}, "mechanism": {"plasma_R2": -0.7094561863512705, "eosinophil_R2": -1.4556298986809408, "geometry_matched_nuclei_delta": 247, "correctly_typed_nuclei_delta": -1255, "matched_type_accuracy_delta": -0.022501780049482223, "spurious_prediction_delta": 1240, "source_mPQ+_deltas": {"consep_n12": -0.0029247385817776084, "crag_n360": -0.023273735455411282, "dpath_n219": -0.018873109409102362, "glas_n108": -0.000028909704473223385, "pannuke_n12": 0.012758909893493042}}, "interpretation": "The epoch-5 R2 uptick did not survive. By epoch 10, rare-class count calibration collapses, typed accuracy falls despite 247 more geometry matches, 1,240 extra spurious predictions appear, and both under- and over-count >10 tails worsen. This rules out a hidden high-LR benefit and places both stage-A metric selectors at the interior LR 1e-4."},
+        "completed_low_lr_endpoint": {"learning_rate": 0.00003, "epoch": 10, "candidate_R2": 0.04193800921827012, "exact_control_R2": -0.5905521725973814, "candidate_mPQ+": 0.3223548214839881, "exact_control_mPQ+": 0.3208588516206779, "interpretation": "The large paired R2 delta was dominated by rescue of the exact control's eosinophil collapse; absolute R2 remained noncompetitive and binary geometry and count tails regressed."},
+        "stage_b_blend_0.25_epoch5": {"learning_rate": 0.0001, "epoch": 5, "R2": 0.41058926615953584, "mPQ+": 0.32282724293882054, "mDQ+": 0.40003203259069925, "mSQ+": 0.7853632489561723, "exact_control_delta": {"R2": -0.024750168238075465, "mPQ+": 0.0008012213375963029, "mDQ+": -0.000054511105178511876, "mSQ+": 0.0016301652960220014}, "count_error_delta": {"mean_signed_error": -0.21472105016408838, "MAE": -0.16596343178621709, "absolute_error_gt_10_fraction": -0.002109704641350213, "absolute_error_gt_20_fraction": -0.0004688232536333853, "under_error_lt_minus_10_fraction": 0.0032817627754336623, "over_error_gt_10_fraction": -0.005391467416783868}, "mechanism": {"geometry_matched_nuclei_delta": -326, "correctly_typed_nuclei_delta": -113, "matched_type_accuracy_delta": 0.0023761779005438965, "spurious_prediction_delta": -501, "largest_R2_losses": "eosinophil SSE in CRAG and DPath", "source_mPQ_counterfactuals": {"crag": -0.0024527068522816053, "dpath": 0.002165396125898389, "glas": 0.000609668986908396, "consep_n12": 0.0003037465141266793, "pannuke_n12": 0.00027831351761420375}}, "interpretation": "The weaker dose contracts recall and false positives together rather than producing the intended equal-instance detection gain. Its tiny pooled mPQ movement is below the practical gate, DQ is flat/slightly lower, and R2 regresses through source-specific rare-class SSE. Epoch 10 remains required, but there is no promotable epoch-5 dose response."},
+        "stage_b_blend_0.25_completed": {"learning_rate": 0.0001, "epoch": 10, "R2": 0.44927583359635676, "mPQ+": 0.36348777289294754, "mDQ+": 0.4492138249575475, "mSQ+": 0.7887903273547529, "exact_control_delta": {"R2": -0.1432719346124373, "mPQ+": -0.011614667319832073, "mDQ+": -0.012961456839939378, "mSQ+": -0.008720192888954426}, "count_error_delta": {"mean_signed_error": 0.47022972339428026, "MAE": 0.11533052039381175, "absolute_error_gt_10_fraction": 0.005391467416783868, "absolute_error_gt_20_fraction": 0.0004688232536333853, "under_error_lt_minus_10_fraction": -0.0030473511486169766, "over_error_gt_10_fraction": 0.008438818565400852}, "mechanism": {"geometry_matched_nuclei_delta": 615, "correctly_typed_nuclei_delta": 446, "matched_type_accuracy_delta": -0.0008866784155932006, "spurious_prediction_delta": 1375, "class_R2_deltas": {"neutrophil": -0.2934459608188422, "epithelial": -0.0047615125701072625, "lymphocyte": -0.002029509914966865, "plasma": -0.24885343688891925, "eosinophil": -0.3435767539667368, "connective": 0.0330355664849491}, "source_mPQ_direction": "negative in every source except a negligible +0.00005 CoNSeP counterfactual"}, "interpretation": "The apparent epoch-5 precision contraction reverses into an aggressive epoch-10 detector: matches rise, but spurious predictions rise more, overcount tails worsen, and five class R2 values plus both typed PQ components regress. Blend 0.25 is rejected for both metrics and does not support a capped variant."},
+        "stage_b_blend_1.0_epoch5": {"learning_rate": 0.0001, "epoch": 5, "R2": 0.3869384883882348, "mPQ+": 0.3326879588712141, "mDQ+": 0.4111492614924934, "mSQ+": 0.7907953038139265, "exact_control_delta": {"R2": -0.0484009460093765, "mPQ+": 0.010661937269989874, "mDQ+": 0.011062717796615662, "mSQ+": 0.007062220153776222, "bPQ": -0.0129059190371923, "binary_DQ": -0.0142155482645688, "binary_SQ": -0.0023799986837551, "AJI+": -0.0146346082594226, "boundary_F1": 0.0000376687137196}, "count_error_delta": {"mean_signed_error": 0.5180496952648848, "MAE": 0.171589310829817, "absolute_error_gt_10_fraction": -0.010548523206751065, "absolute_error_gt_20_fraction": 0.0030473511486169697, "under_error_lt_minus_10_fraction": -0.005625879043600568, "over_error_gt_10_fraction": -0.004922644163150469, "over_error_gt_20_fraction": 0.007735583684950781}, "mechanism": {"geometry_matched_nuclei_delta": -255, "correctly_typed_nuclei_delta": 27, "matched_type_accuracy_delta": 0.0036702950805777013, "spurious_prediction_delta": 3169, "class_PQ_deltas": {"neutrophil": 0.011003810945596035, "epithelial": -0.01843122126197544, "lymphocyte": 0.012763061822897326, "plasma": 0.05485720508485342, "eosinophil": 0.005834762509235453, "connective": -0.0020559954806675385}, "source_mPQ_counterfactuals": {"dpath_n219": 0.005409280009292083, "crag_n360": 0.004410673227978001, "glas_n108": 0.0009092198409989538, "consep_n12": 0.0002248227645714751, "pannuke_n12": 0.000036220237976336556}}, "interpretation": "The typed macro-PQ signal is broad by source and improves both macro DQ and SQ, but it is not a geometry gain: binary DQ/PQ/AJI+ regress, 255 fewer nuclei are matched, and 3,169 extra predictions are emitted, mostly epithelial. The macro gain comes from redistributing typed detections toward plasma, lymphocyte, and rare classes while epithelial PQ falls. R2, MAE, signed overcount bias, and the >20 overcount tail worsen. Keep this as an epoch-5 type-branch diagnostic only; epoch 10 must confirm it, and any persistent signal belongs in a fixed-geometry type screen rather than a standalone segmentation promotion."},
+        "stage_b_blend_1.0_completed": {"learning_rate": 0.0001, "epoch": 10, "R2": 0.46732902120981396, "mPQ+": 0.3632199034584993, "mDQ+": 0.4502506916114608, "mSQ+": 0.7876664686160947, "exact_control_delta": {"R2": -0.1252187469989801, "mPQ+": -0.011882536754280304, "mDQ+": -0.011924590186026096, "mSQ+": -0.009844051627612593, "bPQ": -0.0130627934422556, "binary_DQ": -0.014140343541026, "binary_SQ": -0.0024902979109908, "AJI+": -0.0156198733926764, "boundary_F1": -0.0012801255731692}, "count_error_delta": {"mean_signed_error": 0.7780121894045942, "MAE": 0.6092358180965771, "absolute_error_gt_10_fraction": 0.011017346460384436, "absolute_error_gt_20_fraction": 0.012423816221284578, "under_error_lt_minus_10_fraction": -0.0016408813877168346, "over_error_gt_10_fraction": 0.012658227848101278, "over_error_gt_20_fraction": 0.01359587435536802}, "mechanism": {"geometry_matched_nuclei_delta": 170, "correctly_typed_nuclei_delta": -261, "matched_type_accuracy_delta": -0.006267527814874274, "spurious_prediction_delta": 3540, "class_R2_deltas": {"neutrophil": -0.17011934755578828, "epithelial": -0.1519823914556917, "lymphocyte": -0.012526343638941784, "plasma": -0.38923058838197844, "eosinophil": -0.04983750716880131, "connective": 0.022383696207320947}, "class_PQ_deltas": {"neutrophil": -0.03544648314173218, "epithelial": -0.02021234348286821, "lymphocyte": -0.01201819973788043, "plasma": -0.011910291283204144, "eosinophil": 0.015549985151610102, "connective": -0.007257888031607207}, "source_mPQ_counterfactuals": {"glas_n108": -0.003985502232314642, "dpath_n219": -0.0037748869642776905, "crag_n360": -0.002558143005279012, "consep_n12": -0.00032717714923719, "pannuke_n12": -0.00018908275412887754}}, "interpretation": "The epoch-5 typed signal reverses by epoch 10. Every source contribution to pooled mPQ is negative; both typed components, binary geometry, AJI+, boundary F1, five class R2 values, MAE, signed bias, and both >10/>20 tails regress. A small increase in geometry matches is overwhelmed by 3,540 extra predictions and 261 fewer correctly typed matches."},
+        "final_selection": {"selected_blend": 0.5, "selected_learning_rate": 0.0001, "selected_epoch": 10, "R2": 0.594744394033461, "mPQ+": 0.3685506054522723, "mDQ+": 0.45499351000376126, "mSQ+": 0.7877963070304421, "delta_vs_independently_selected_ordinary_loss": {"R2": -0.03744450136852229, "mPQ+": -0.010419983148314438, "mDQ+": -0.010780161399610966, "mSQ+": -0.008053550071001059}},
+        "interpretation": "The complete dose grid rejects instance-equalized NP/TP/HV foreground loss. Blend 0.25, 0.5, and 1.0 all finish below their exact ordinary-loss control in mPQ/mDQ and R2. The full-dose epoch-5 typed signal reverses by epoch 10, while binary geometry and spurious-prediction behavior are consistently unfavorable. The independently selected E42 recipe is also worse than independently selected ordinary loss on all four headline components. No capped variant or mature extension is justified; E43 tests the narrower and more faithful per-nucleus typing hypothesis without inheriting E42 geometry weighting."
+      },
+      "training_weight_exposure": {
+        "development_training_nuclei": 419106,
+        "blend": 0.5,
+        "median_pixel_weight": 1.0559154778962505,
+        "p99_pixel_weight": 8.667476266022044,
+        "maximum_pixel_weight": 122.6474358974359,
+        "fraction_above_4": 0.023602620816690765,
+        "interpretation": "Equal mass creates a heavy tail for 1-5-pixel GT components, which may be clipped boundary fragments or annotation noise. This explained why a cap was implemented as a contingency, but the completed uncapped grid failed to retain the required typed-DQ signal, so the cap was not admitted."
+      },
+      "capped_variant_readiness": {
+        "status": "implemented and unit-tested contingency; not admitted after the uncapped causal grid failed its typed-DQ gate",
+        "interface": "--instance-loss-max-weight; zero preserves the original uncapped behavior",
+        "properties": "Caps final blended foreground pixel weights, mass-renormalizes the remaining foreground weights to mean one per patch, and leaves background weights exactly one.",
+        "admission_gate": "The predeclared gate required uncapped E42 to retain a validation macro-mPQ+/mDQ+ signal while worsening spurious instances, binary DQ, or count tails. It did not retain that signal, so the capped run is closed."
+      },
+      "artifacts": {
+        "live_stage_a_curve": "outputs/conic_experiments/curves/e42_instance_equalized_stage_a_live.png",
+        "live_dose_response_curve": "outputs/conic_experiments/curves/e42_instance_loss_dose_progress.png",
+        "weight_exposure_report": "outputs/conic_experiments/e42_instance_loss_weight_exposure.json",
+        "weight_exposure_plot": "outputs/conic_experiments/curves/e42_instance_loss_weight_exposure.png",
+        "size_audit_script": "scripts/analyze_hovernet_detection_by_size.py",
+        "planned_size_audit": "outputs/conic_experiments/e42_instance_equalized_detection_by_size.json",
+        "stage_a_exact_control_audit": "outputs/conic_experiment_audits/e42_blend_0p5_vs_matched_control.json",
+        "stage_b_blend_0.25_audit": "outputs/conic_experiment_audits/e42_blend_0p25_vs_matched_control.json",
+        "stage_b_blend_1.0_audit": "outputs/conic_experiment_audits/e42_blend_1_vs_matched_control.json",
+        "pilot_summary": "outputs/conic_instance_loss_pilots/e42_instance_loss_summary.json"
+      },
+      "guardrail": "Do not call this metric alignment unless a seed-matched control improves pooled and rare-class DQ. Audit SQ, boundary F1, instance-size bins, class confusion, signed count bias, and outlier proportions; reject a DQ gain caused by fragmented masks or degraded SQ."
+    },
+    {
+      "id": "E43",
+      "name": "hovernet_instance_pooled_type_auxiliary",
+      "status": "live stage-B validation — stage A selected LR 1e-4 for both objectives; auxiliary weights 0.05 and 0.25 running",
+      "change": "Add an auxiliary type cross-entropy computed once per ground-truth nucleus after mean-pooling the model's type probabilities over that nucleus; keep the existing pixel type losses unchanged.",
+      "selection_metric": "development-validation mPQ+ with R2, per-class DQ/SQ, confusion, and signed/outlier count guardrails; learning rate and auxiliary weight selected jointly without test inference",
+      "hypothesis": "Inference assigns one majority-voted type to each decoded nucleus, but pixel cross-entropy overweights large nuclei and boundary pixels. Mean-probability pooling is a differentiable relaxation—not an exact replica—of that vote and gives every training nucleus equal objective mass.",
+      "baseline_diagnostic": {
+        "evaluation_set": "retrospective 657-patch internal test; diagnostic only, never used for selection",
+        "overall_geometry_matched_type_accuracy": 0.8658443,
+        "neutrophil": {"geometry_recall": 0.4268, "type_accuracy_given_geometry_match": 0.4381},
+        "eosinophil": {"geometry_recall": 0.4081, "type_accuracy_given_geometry_match": 0.6266},
+        "plasma": {"geometry_recall": 0.8829, "type_accuracy_given_geometry_match": 0.6359},
+        "interpretation": "Neutrophil is limited by both geometry and typing; eosinophil is more detection-limited; plasma has good geometric coverage but substantial typing confusion. E43 can plausibly help typing but cannot substitute for E42 or class-aware exposure."
+      },
+      "planned_gate": "Run if E42 or class-balanced E37 improves independently selected validation mPQ+ and mDQ+ by more than 0.003 without reducing mSQ+ by more than 0.005. Bracket learning rate at weight 0.1, then test weights 0.05 and 0.25 only at the union of metric-specific selected LRs; expand any winning boundary before promotion.",
+      "implementation_validation": {
+        "exact_selected_lr_epoch_control_lookup": true,
+        "typed_mPQ_DQ_SQ_gate": true,
+        "binary_bPQ_DQ_SQ_guard": true,
+        "directional_count_tail_guard": true,
+        "major_source_stability_guard": true,
+        "within_instance_nll_probability_pooled_entropy_pixel_entropy_spatial_JS_disagreement_and_pixel_accuracy_reported": true,
+        "exact_control_spatial_JS_backfilled_before_promotion_or_candidate_held": true,
+        "spatial_JS_increase_above_0.005_blocks_standalone_and_fixed_geometry_routes": true,
+        "geometry_failure_routes_only_to_fixed_geometry_type_screen": true
+      },
+      "interim_validation_observation": {
+        "evaluation_set": "711-patch source-group-disjoint development validation",
+        "selection_status": "provisional trajectory point only; not independently selected",
+        "candidate": {
+          "instance_type_loss_weight": 0.1,
+          "learning_rate": 0.00003,
+          "epoch": 5,
+          "R2": 0.3260004828155607,
+          "mPQ+": 0.28182607964824496,
+          "mDQ+": 0.3525518836809534,
+          "mSQ+": 0.531528336380691
+        },
+        "exact_matched_control_delta": {
+          "R2": 0.008811758985265493,
+          "mPQ+": 0.0014952284024919585,
+          "mDQ+": 0.001400169446165324,
+          "mSQ+": 0.0008722945823482275,
+          "binary_PQ": -0.0001659934714459865,
+          "instance_type_NLL": -0.07608448755409673,
+          "pixel_type_accuracy": 0.00922587065953745,
+          "correctly_typed_nuclei": 163,
+          "geometry_matched_nuclei": -120
+        },
+        "interpretation": "The intended typing mechanism is active without a binary-geometry gain: per-nucleus supervision improves type NLL, pixel type accuracy, matched type accuracy, and correctly typed nuclei, but the pooled mPQ+/mDQ+ deltas remain below the predeclared +0.003 promotion threshold. DPath has a small detection-quality decline while CRAG and GLaS improve. Continue through epoch 10 and the complete LR/weight bracket before selection.",
+        "completed_low_lr_endpoint": {
+          "instance_type_loss_weight": 0.1,
+          "learning_rate": 0.00003,
+          "epoch": 10,
+          "R2": -0.2525005897343963,
+          "mPQ+": 0.32239997817918775,
+          "mDQ+": 0.3994456416046413,
+          "mSQ+": 0.7883015253529985,
+          "exact_control_delta_R2": 0.3380515828629851,
+          "exact_control_delta_mPQ+": 0.0015411265585098618,
+          "exact_control_delta_mDQ+": 0.002169141838381181,
+          "exact_control_delta_mSQ+": 0.1243335772955308,
+          "eosinophil_R2": -3.682458619330581,
+          "eosinophil_count_ratio": 3.016835016835017,
+          "interpretation": "Not promotable: both absolute objectives remain well below independently selected ordinary loss. The large macro-mSQ+ delta is mainly a zero-to-first-match discontinuity for rare classes, while eosinophil overprediction drives the negative macro R2. This supports testing the predeclared lower auxiliary dose rather than promoting the low-LR endpoint."
+        },
+        "interior_lr_epoch5": {
+          "instance_type_loss_weight": 0.1,
+          "learning_rate": 0.0001,
+          "epoch": 5,
+          "R2": 0.46311597850717406,
+          "mPQ+": 0.3428988761410863,
+          "mDQ+": 0.4241249703745409,
+          "mSQ+": 0.7929285683728923,
+          "exact_control_delta_R2": 0.02777654410956273,
+          "exact_control_delta_mPQ+": 0.02087285453986209,
+          "exact_control_delta_mDQ+": 0.024038677931490616,
+          "exact_control_delta_mSQ+": 0.00919548471274204,
+          "exact_control_delta_bPQ": 0.001542569872351573,
+          "class_PQ_deltas": {
+            "neutrophil": 0.022248974598116922,
+            "epithelial": 0.003494410852448726,
+            "lymphocyte": 0.014591368786377678,
+            "plasma": 0.05849179657349435,
+            "eosinophil": 0.018043391980107016,
+            "connective": 0.008368961250627853
+          },
+          "major_source_mPQ+_deltas": {
+            "crag": 0.019791738922261216,
+            "dpath": 0.02178066187586858,
+            "glas": 0.01664632111868425
+          },
+          "count_tail_deltas": {
+            "MAE": -0.24261603375527496,
+            "absolute_error_gt_10_fraction": -0.003750586029066111,
+            "absolute_error_gt_20_fraction": -0.0032817627754336627
+          },
+          "candidate_spatial_JS_disagreement": 0.09450825885831328,
+          "interpretation": "Promising exact-checkpoint typed signal: all six class PQ values and all three major-source mPQ+ values improve, binary geometry is preserved, and count tails improve. It remains provisional because its absolute score is below independently selected ordinary loss, epoch 10 may reverse the gain, and the exact-control spatial-JS diagnostic is not yet backfilled."
+        },
+        "interior_lr_epoch10": {
+          "instance_type_loss_weight": 0.1,
+          "learning_rate": 0.0001,
+          "epoch": 10,
+          "R2": 0.568038508344896,
+          "mPQ+": 0.37030686088971015,
+          "mDQ+": 0.4577322794657152,
+          "mSQ+": 0.7913518312151661,
+          "exact_control_delta_R2": -0.02450925986389807,
+          "exact_control_delta_mPQ+": -0.004795579323069454,
+          "exact_control_delta_mDQ+": -0.004443002331771695,
+          "exact_control_delta_mSQ+": -0.00615868902854122,
+          "neutrophil_PQ_delta": -0.044002791556658136,
+          "neutrophil_TP_delta": -81,
+          "neutrophil_FP_delta": -349,
+          "neutrophil_count_ratio": 0.5281065088757396,
+          "major_source_mPQ+_deltas": {
+            "crag": -0.0002076297606962707,
+            "dpath": -0.009120516417295665,
+            "glas": -0.014946337662925302
+          },
+          "candidate_spatial_JS_disagreement": 0.09135231477599183,
+          "interpretation": "The broad epoch-5 typed gain reverses. Improved aggregate type NLL and matched type accuracy do not align with mPQ: the model becomes too conservative for neutrophils, losing 81 typed true positives while removing 349 false positives, and DPath/GLaS regress. This endpoint is not promotable; complete LR 3e-4 before selecting the lower auxiliary dose."
+        },
+        "upper_lr_epoch5": {
+          "instance_type_loss_weight": 0.1,
+          "learning_rate": 0.0003,
+          "epoch": 5,
+          "R2": 0.3675578864826586,
+          "mPQ+": 0.3579443020931559,
+          "mDQ+": 0.43675575136039196,
+          "mSQ+": 0.8061727436688207,
+          "exact_control_delta_R2": -0.04770665884264508,
+          "exact_control_delta_mPQ+": 0.006566613458816595,
+          "exact_control_delta_mDQ+": 0.0065205867636777826,
+          "exact_control_delta_mSQ+": -0.0004058328206022477,
+          "exact_control_delta_bPQ": 0.0008232436450053005,
+          "class_PQ_deltas": {
+            "neutrophil": 0.0030698340538728996,
+            "epithelial": -0.00409738271038923,
+            "lymphocyte": 0.0049267410268976075,
+            "plasma": 0.03367373780843946,
+            "eosinophil": -0.006746624167300513,
+            "connective": 0.008573374741379536
+          },
+          "major_source_component_deltas": {
+            "crag": {"mPQ+": -0.007704008834035381, "mDQ+": -0.0105406981603558, "mSQ+": 0.0005667345756089626},
+            "dpath": {"mPQ+": 0.016286450112810713, "mDQ+": 0.017240260894667347, "mSQ+": 0.0026242246947334458},
+            "glas": {"mPQ+": 0.01078225472977623, "mDQ+": 0.013033774225019723, "mSQ+": -0.010515641334168935}
+          },
+          "count_tail_deltas": {
+            "MAE": 0.09540553211439207,
+            "absolute_error_gt_10_fraction": 0.007969995311767453,
+            "absolute_error_gt_20_fraction": 0.007032348804500696
+          },
+          "mechanism": {
+            "geometry_matched_nuclei_delta": 85,
+            "correctly_typed_nuclei_delta": -131,
+            "spurious_prediction_delta": 31,
+            "matched_type_accuracy_delta": -0.003135543992623502,
+            "candidate_spatial_JS_disagreement": 0.0928756330872329
+          },
+          "interpretation": "The modest exact-checkpoint mPQ+/mDQ+ gain is chiefly plasma-cell DQ, not a broad typing improvement. CRAG mDQ+ and GLaS mSQ+ cross the -0.01 major-source safety boundary, epithelial/eosinophil PQ regress, correctly typed nuclei fall by 131, and count tails worsen. This epoch cannot be promoted; the epoch-10 endpoint still completes the LR bracket before lower-dose selection."
+        },
+        "completed_upper_lr_endpoint": {
+          "instance_type_loss_weight": 0.1,
+          "learning_rate": 0.0003,
+          "epoch": 10,
+          "R2": 0.41461775515168303,
+          "mPQ+": 0.36841057782321407,
+          "mDQ+": 0.45253338815719046,
+          "mSQ+": 0.7960497326076353,
+          "exact_control_delta_R2": -0.21757114025030028,
+          "exact_control_delta_mPQ+": -0.010560010777372675,
+          "exact_control_delta_mDQ+": -0.013240283246181761,
+          "exact_control_delta_mSQ+": 0.00019987550619215977,
+          "exact_control_delta_bPQ": -0.0006068758423997123,
+          "class_PQ_deltas": {
+            "neutrophil": -0.029847968298279,
+            "epithelial": 0.0008765884288841619,
+            "lymphocyte": -0.025719539197581187,
+            "plasma": -0.01819563129945312,
+            "eosinophil": 0.009861739586797202,
+            "connective": -0.00033525388460436956
+          },
+          "major_source_component_deltas": {
+            "crag": {"mPQ+": -0.01718326762160144, "mDQ+": -0.02089940726060685, "mSQ+": 0.0002113992599407366},
+            "dpath": {"mPQ+": -0.007200297589500193, "mDQ+": -0.010845010861803783, "mSQ+": 0.006003777649068454},
+            "glas": {"mPQ+": -0.022628152462248752, "mDQ+": -0.024619784909549747, "mSQ+": -0.028299392987730654}
+          },
+          "count_tail_deltas": {
+            "MAE": 0.5818096577590248,
+            "absolute_error_gt_10_fraction": 0.022972339428035643,
+            "absolute_error_gt_20_fraction": 0.008438818565400845
+          },
+          "mechanism": {
+            "instance_type_NLL_delta": -0.12067809527770679,
+            "pixel_type_accuracy_delta": 0.02402662491075347,
+            "geometry_matched_nuclei_delta": 530,
+            "correctly_typed_nuclei_delta": -198,
+            "spurious_prediction_delta": 1167,
+            "matched_type_accuracy_delta": -0.009730571951023781,
+            "candidate_spatial_JS_disagreement": 0.0869436921142976
+          },
+          "interpretation": "The upper-LR transient reverses decisively by epoch 10. Type NLL and pixel accuracy improve, yet typed DQ falls because 530 extra geometry matches arrive with 1,167 extra spurious nuclei and 198 fewer correctly typed nuclei. Five class PQ values do not improve, every major source loses DQ, count tails worsen, and R2 falls sharply. Better pixel calibration is therefore not sufficient for the leaderboard objective."
+        },
+        "stage_a_selection": {
+          "learning_rate_for_R2": 0.0001,
+          "learning_rate_for_mPQ+": 0.0001,
+          "selected_R2": 0.568038508344896,
+          "selected_mPQ+": 0.37030686088971015,
+          "interpretation": "The equal-horizon 3e-5/1e-4/3e-4 bracket selects the interior LR 1e-4 for both objectives. Only weights 0.05 and 0.25 at 1e-4 advance to stage B; no extra LR/dose cross-product is run."
+        },
+        "lower_dose_epoch5": {
+          "instance_type_loss_weight": 0.05,
+          "learning_rate": 0.0001,
+          "epoch": 5,
+          "R2": 0.40951317357375866,
+          "mPQ+": 0.3399274786568307,
+          "mDQ+": 0.4194342270217249,
+          "mSQ+": 0.7936709572437146,
+          "exact_control_delta_R2": -0.025826260823852643,
+          "exact_control_delta_mPQ+": 0.017901457055606473,
+          "exact_control_delta_mDQ+": 0.01934768332584713,
+          "exact_control_delta_mSQ+": 0.00993787358356435,
+          "exact_control_delta_bPQ": 0.0023229332275456205,
+          "class_PQ_deltas": {
+            "neutrophil": 0.008873627598128112,
+            "epithelial": 0.004886791229708032,
+            "lymphocyte": 0.013950528267953066,
+            "plasma": 0.05241750089229985,
+            "eosinophil": 0.021637866535957617,
+            "connective": 0.0056424278095920655
+          },
+          "major_source_component_deltas": {
+            "crag": {"mPQ+": 0.013310951235237789, "mDQ+": 0.013222164992018004, "mSQ+": 0.018919685276892917},
+            "dpath": {"mPQ+": 0.017078392784871887, "mDQ+": 0.017996941574360104, "mSQ+": 0.008487800703052217},
+            "glas": {"mPQ+": 0.031173122894644245, "mDQ+": 0.03713305928725097, "mSQ+": 0.02373380461275565}
+          },
+          "count_tail_deltas": {
+            "MAE": -0.05039849976558841,
+            "absolute_error_gt_10_fraction": 0.0,
+            "absolute_error_gt_20_fraction": 0.002812939521800284
+          },
+          "mechanism": {
+            "geometry_matched_nuclei_delta": 357,
+            "correctly_typed_nuclei_delta": 446,
+            "spurious_prediction_delta": -123,
+            "matched_type_accuracy_delta": 0.002442498705493956,
+            "candidate_spatial_JS_disagreement": 0.09031490086695818
+          },
+          "delta_vs_weight_0.1_same_checkpoint": {
+            "R2": -0.053602804933415404,
+            "mPQ+": -0.002971397484255567,
+            "mDQ+": -0.004691245843882141,
+            "mSQ+": 0.0007418591623427062
+          },
+          "interpretation": "This is a broad mPQ-specific exact-checkpoint signal: all six class PQ values and every source-level mPQ+/mDQ+/mSQ+ improve, binary geometry is safe, correctly typed nuclei rise by 446, and spurious predictions fall by 123. It trails weight 0.1 slightly at epoch 5 but may be more stable because the stronger dose reversed by epoch 10. Count R2 remains a separate negative objective and does not veto this mPQ candidate. Endpoint stability, weight 0.25, and paired spatial-JS backfill remain required."
+        }
+      },
+      "artifacts": {
+        "planned_summary": "outputs/conic_instance_type_pilots/e43_instance_type_summary.json",
+        "live_lr_curve": "outputs/conic_experiments/curves/e43_instance_type_lr_live.png",
+        "live_dose_curve": "outputs/conic_experiments/curves/e43_instance_type_dose_live.png"
+      },
+      "guardrail": "Pooling can conceal internally inconsistent type maps and cannot repair missed or merged nuclei. Pooled entropy alone is insufficient, so report normalized within-nucleus Jensen-Shannon disagreement H(mean p)-mean H(p) and reject a paired increase above 0.005. Also reject mPQ-specific improvements that reduce SQ/binary geometry, worsen major-source confusion, or merely trade common-class accuracy for unstable rare-class predictions. Report directional count tails, but do not use the separate R2 objective to veto an otherwise valid mPQ-specific model."
+    },
+    {
+      "id": "E44",
+      "name": "hovernet_type_loss_weighting_and_focal_ablation",
+      "status": "complete — rejected for both objectives after the expanded ordinary-loss control selected higher mPQ+ at 6e-4",
+      "change": "Inside HoVer-Net segmentation training, isolate fixed complement-frequency type weighting, focal emphasis, and their pure combination. Test 0.05 label smoothing only as a conditional marginal add-on to a validation-successful pure combination. Frequencies come only from development-training nucleus counts; background remains separately weight 1.",
+      "selection_metric": "group-disjoint development-validation mPQ+ and R2 selected independently; the mPQ-specific recipe receives seed-matched controls at every expanded learning rate",
+      "planned_grid": {
+        "weighting_only": "rho 3, focal gamma 0, smoothing 0 at learning rates 3e-5, 1e-4, 3e-4",
+        "focal_only": "rho 0, focal gamma 2, smoothing 0 at learning rates 3e-5, 1e-4, 3e-4",
+        "combined": "rho 3, focal gamma 2, smoothing 0 at learning rates 3e-5, 1e-4, 3e-4",
+        "conditional_smoothing_add_on": "rho 3, focal gamma 2, smoothing 0.05 only at the union of the pure combination's validation-selected R2 and mPQ+ learning rates, and only if that pure combination improves mPQ+ and mDQ+ by >0.003 with mSQ+ delta >-0.005",
+        "upper_lr_expansion": "Run 6e-4 for the validation-selected pure-or-smoothed recipe with a seed-205 ordinary-loss control; continue to 1e-3 only if either candidate R2 or mPQ+ has not turned down relative to lower rates",
+        "control": "seed-205 ordinary type cross-entropy with the same split, horizon, initialization, and optimizer-step budget"
+      },
+      "rho3_weights_background_then_classes": [1.0, 1.507988, 0.200916, 0.730277, 1.311346, 1.513375, 0.736097],
+      "rho3_weight_note": "Ordered as background, neutrophil, epithelial, lymphocyte, plasma, eosinophil, connective. The 7.5x rare-versus-epithelial ratio is intentionally tempered relative to inverse frequency but still strong enough that false-positive tails are a primary rejection gate.",
+      "hypothesis": "Type-branch pixel cross-entropy is dominated by common/easy pixels. Complement-frequency weighting redirects gradient budget toward rare classes, while focal modulation suppresses already-easy pixels; their effects must be isolated before testing composition with class-aware patch sampling.",
+      "interim_validation_observation": {
+        "evaluation_set": "711-patch source-group-disjoint development validation",
+        "candidate": {"R2": 0.3404431074779988, "mPQ+": 0.28606167387554193, "mDQ+": 0.3577109661481839, "mSQ+": 0.5312064169581291},
+        "exact_matched_control_delta": {"R2": 0.023254386301261698, "mPQ+": 0.005730206738079835, "mDQ+": 0.006558714610660876, "mSQ+": 0.0005504122402795186, "bPQ": -0.0003275074242627962, "binary_DQ": -0.0006989163336369453, "binary_SQ": 0.0003132427251560932},
+        "count_error_delta": {"mean_signed_error": -0.24777308954524147, "MAE": -0.3265353961556485, "absolute_error_gt_10_fraction": -0.011486169714017808, "absolute_error_gt_20_fraction": -0.006329113924050639},
+        "mechanism": {"plasma_PQ_delta": 0.03239271267561589, "neutrophil_PQ_delta": 0.0, "eosinophil_PQ_delta": 0.0, "geometry_matched_nuclei_delta": -505, "correctly_typed_nuclei_delta": -268, "matched_type_accuracy_delta": 0.002208166640384479, "spurious_prediction_delta": -1105, "pixel_type_accuracy_delta": -0.03197847518693575, "instance_type_NLL_delta": 0.09124086206335036},
+        "completed_low_lr_mPQ_endpoint": {
+          "learning_rate": 0.00003,
+          "epoch": 10,
+          "candidate": {"R2": 0.16176759273532978, "mPQ+": 0.33869682033137205, "mDQ+": 0.4219472666317725, "mSQ+": 0.7786990781774071},
+          "exact_matched_control_delta": {"R2": 0.7523197653327112, "mPQ+": 0.017837968710694152, "mDQ+": 0.024670766865512395, "mSQ+": 0.1147311301199394, "bPQ": -0.0018139528694790519, "binary_DQ": -0.0020316139664893207, "binary_SQ": -0.00030839970082130463},
+          "delta_vs_independently_selected_ordinary_loss": {"R2": -0.4704213026666535, "mPQ+": -0.04027376826921469, "mDQ+": -0.043826404771599696, "mSQ+": -0.01715077892403616},
+          "class_PQ_delta_vs_exact_low_lr_control": {"neutrophil": 0.062030241333128386, "epithelial": -0.003231813320899224, "lymphocyte": 0.010587796645889491, "plasma": 0.0057834756360084505, "eosinophil": 0.03338539312280757, "connective": -0.0015272811527696772},
+          "interpretation": "The intended rare-class effect appears by epoch 10, but only as a rescue relative to a pathological low-LR control whose R2, rare-class PQ, and macro SQ collapse. The weighted endpoint remains substantially below the independently selected ordinary-loss recipe on both leaderboard metrics and both typed components. This LR is not promotable; LR 1e-4 and 3e-4 must determine whether the effect survives in a competitive regime."
+        },
+        "interior_lr_epoch5": {
+          "learning_rate": 0.0001,
+          "epoch": 5,
+          "candidate": {"R2": 0.49850022520609283, "mPQ+": 0.3490711676589546, "mDQ+": 0.4300000777947916, "mSQ+": 0.7942705181471248},
+          "exact_matched_control_delta": {"R2": 0.06316079080848153, "mPQ+": 0.02704514605773034, "mDQ+": 0.02991353409891384, "mSQ+": 0.010537434486974528, "bPQ": 0.0021257019021823087, "binary_DQ": 0.002540533715813531, "binary_SQ": 0.00016480043409194955},
+          "count_error_delta": {"mean_signed_error": -0.08016877637130815, "MAE": -0.390060947022973, "absolute_error_gt_10_fraction": -0.01289263947491795, "absolute_error_gt_20_fraction": -0.005625879043600568},
+          "mechanism": {"geometry_matched_nuclei_delta": 88, "correctly_typed_nuclei_delta": 678, "matched_type_accuracy_delta": 0.009485562944580028, "spurious_prediction_delta": -420, "class_PQ_deltas": {"neutrophil": 0.020627292684518586, "epithelial": 0.0035079946542149187, "lymphocyte": 0.01564358624084694, "plasma": 0.11502264398948847, "eosinophil": 0.004594209707333097, "connective": 0.002875149069979599}},
+          "source_guardrail": {"consep_patches": 12, "consep_mPQ+_delta": 0.00209491885417723, "consep_mDQ+_delta": -0.008702488715879197, "consep_mSQ+_delta": -0.10167571205578674},
+          "interpretation": "This is the first coherent weighting-only signal in a competitive LR regime: both official endpoints, typed DQ/SQ, binary geometry, correctly typed matches, MAE, and >10/>20 tails improve versus the exact control, with positive PQ movement in five classes. Plasma is still the largest driver. The tiny CoNSeP subset has a severe SQ decline despite near-flat mPQ, so epoch 10, the remaining LR, and source-size-aware diagnostics are required."
+        },
+        "interior_lr_epoch10": {
+          "learning_rate": 0.0001,
+          "epoch": 10,
+          "candidate": {"R2": 0.5114461340011248, "mPQ+": 0.3683981002556987, "mDQ+": 0.4557608610294403, "mSQ+": 0.7911929063559017},
+          "exact_matched_control_delta": {"R2": -0.08110163420766925, "mPQ+": -0.006704339957080918, "mDQ+": -0.0064144207680466026, "mSQ+": -0.0063176138878056065, "bPQ": 0.00044813233916241035, "binary_DQ": 0.0008246769378914554, "binary_SQ": -0.00028135366302151077},
+          "count_error_delta": {"mean_signed_error": 0.31082981715893077, "MAE": 0.15986872948898245, "absolute_error_gt_10_fraction": 0.006094702297233939, "absolute_error_gt_20_fraction": 0.0032817627754336692},
+          "mechanism": {"geometry_matched_nuclei_delta": 585, "correctly_typed_nuclei_delta": -74, "matched_type_accuracy_delta": -0.00859955428063286, "spurious_prediction_delta": 765, "class_PQ_delta_direction": "negative for all six classes", "largest_source_mPQ+_regressions": {"dpath": -0.014323013441139232, "glas": -0.01868484850897778}},
+          "interpretation": "The coherent epoch-5 gain turns over. By epoch 10 all six class PQ values regress, typed DQ and SQ both fall, DPath/GLaS drive source losses, and increased geometry matches are accompanied by fewer correctly typed matches, more spurious predictions, lower matched-type accuracy, and worse count tails. The transient can motivate a future dose/early-stopping hypothesis only if another family confirms it; weighting-only is not promotable at LR 1e-4."
+        },
+        "upper_lr_epoch5": {
+          "learning_rate": 0.0003,
+          "epoch": 5,
+          "candidate": {"R2": 0.4148594870517511, "mPQ+": 0.3525523399383012, "mDQ+": 0.4316397776818513, "mSQ+": 0.800909154587781},
+          "exact_matched_control_delta": {"R2": -0.00040505827355258317, "mPQ+": 0.0011746513039618822, "mDQ+": 0.0014046130851371186, "mSQ+": -0.005669421901641991, "bPQ": 0.0013280041077246008},
+          "count_error_delta": {"mean_signed_error": 0.14439756211908117, "MAE": -0.1490857946554156, "absolute_error_gt_10_fraction": -0.000703234880450071, "absolute_error_gt_20_fraction": -0.004219409282700426},
+          "mechanism": {"geometry_matched_nuclei_delta": 315, "correctly_typed_nuclei_delta": 280, "matched_type_accuracy_delta": 0.00037590721010616335, "spurious_prediction_delta": 471, "class_PQ_deltas": {"neutrophil": -0.009360081533459116, "epithelial": 0.000620717801296744, "lymphocyte": -0.00949471394987167, "plasma": 0.04577865313663715, "eosinophil": -0.024006110990324014, "connective": 0.0035094433594921592}},
+          "source_mPQ+_deltas": {"consep": -0.0023853551819612018, "crag": -0.003486730074336253, "dpath": 0.008351811976065382, "glas": -0.012080003754400936, "pannuke": -0.013169634543419184},
+          "interpretation": "At the upper LR, epoch 5 is pooled-neutral and fails the typed guardrail: mPQ+/mDQ+ gains are below the practical threshold and mSQ+ falls beyond tolerance. The 315 extra geometry matches and lower MAE come with 471 extra spurious predictions. Plasma alone supplies a material PQ gain; neutrophil, lymphocyte, and eosinophil regress. DPath improves while GLaS and the tiny PanNuke stratum decline. The large GLaS R2 recovery is relative to a pathological exact-control checkpoint and is canceled by CRAG/DPath losses in pooled R2."
+        },
+        "upper_lr_epoch10": {
+          "learning_rate": 0.0003,
+          "epoch": 10,
+          "candidate": {"R2": 0.3787081394173984, "mPQ+": 0.36581851847152097, "mDQ+": 0.4507662642157295, "mSQ+": 0.7946367550622638},
+          "exact_matched_control_delta": {"R2": -0.2534807559845849, "mPQ+": -0.013152070129065774, "mDQ+": -0.015007407187642707, "mSQ+": -0.0012131020391793479, "bPQ": -0.00019573193990995996},
+          "count_error_delta": {"mean_signed_error": 0.12447257383966237, "MAE": 0.7555086732301923, "absolute_error_gt_10_fraction": 0.024144397562119085, "absolute_error_gt_20_fraction": 0.013361462728551342},
+          "type_diagnostic_delta": {"GT_nucleus_NLL": 0.2182614761457231, "GT_nucleus_target_probability": -0.035583366111077375, "GT_nucleus_pixel_accuracy": -0.039186022595376846},
+          "mechanism": {"geometry_matched_nuclei_delta": 283, "correctly_typed_nuclei_delta": -1064, "matched_type_accuracy_delta": -0.01999873906999805, "spurious_prediction_delta": 343, "class_PQ_deltas": {"neutrophil": -0.009126357580260702, "epithelial": -0.0016298553973555507, "lymphocyte": -0.023769680935901705, "plasma": -0.034519655637321955, "eosinophil": 0.006974861444634245, "connective": -0.016841732668189224}},
+          "source_mPQ+_deltas": {"consep": -0.004844291210986285, "crag": -0.01468520680018981, "dpath": -0.015443350908932452, "glas": -0.017868098416547906, "pannuke": 0.02102376967618841},
+          "interpretation": "The upper-LR endpoint decisively rejects fixed weighting: five class PQ values, all three major-source mPQ values, calibration/typing diagnostics, correctly typed matches, MAE, and both large-error proportions regress. Extra geometry matches are not useful because typing accuracy falls and spurious predictions rise."
+        },
+        "weighting_only_final_selection": {
+          "evaluation_set": "711-patch source-group-disjoint development validation",
+          "selected_R2": {"learning_rate": 0.0001, "epoch": 10, "R2": 0.5114461340011248, "delta_vs_independently_selected_ordinary_loss": -0.12074276140085849},
+          "selected_mPQ+": {"learning_rate": 0.0001, "epoch": 10, "mPQ+": 0.3683981002556987, "mDQ+": 0.4557608610294403, "mSQ+": 0.7911929063559017, "delta_vs_independently_selected_ordinary_loss": {"mPQ+": -0.010572488344888054, "mDQ+": -0.010012810373931924, "mSQ+": -0.0046569507455415105}},
+          "selection_boundary": "Both selected metrics are at epoch 10, the scored-horizon boundary, but the recipe is rejected before any extension because it loses independently selected R2, mPQ+, and mDQ+ and fails count-tail and major-source guards.",
+          "decision": "reject standalone and reject fixed-geometry type-composition admission"
+        },
+        "focal_only_interim": {
+          "evaluation_set": "711-patch source-group-disjoint development validation · focal gamma 2, LR 3e-5; complete low-LR trajectory, family still provisional",
+          "candidate": {"R2": 0.3367722913531354, "mPQ+": 0.2822686778963775, "mDQ+": 0.3527850910485058, "mSQ+": 0.5318232710312176},
+          "exact_matched_control_delta": {"R2": 0.019583570176398335, "mPQ+": 0.0019372107589153975, "mDQ+": 0.0016328395109828087, "mSQ+": 0.0011672663133680539, "bPQ": 0.0007598471415438679},
+          "count_error_delta": {"mean_signed_error": -0.22784810126582267, "MAE": -0.22128457571495463, "absolute_error_gt_10_fraction": -0.0037505860290670545, "absolute_error_gt_20_fraction": -0.0016408813877168277},
+          "type_diagnostic_delta": {"GT_nucleus_NLL": -0.01631116951568079, "GT_nucleus_target_probability": -0.010507250100484478, "GT_nucleus_pixel_accuracy": -0.004500696840897378},
+          "mechanism": {"geometry_matched_nuclei_delta": -328, "correctly_typed_nuclei_delta": -80, "matched_type_accuracy_delta": 0.002959042396886602, "spurious_prediction_delta": -792, "class_PQ_deltas": {"neutrophil": 0.0, "epithelial": 0.0015082828588715014, "lymphocyte": 0.0065833034110142075, "plasma": 0.0014424414732974733, "eosinophil": 0.0, "connective": 0.002089236810309647}},
+          "source_mPQ+_deltas": {"consep": -0.01070813748810473, "crag": -0.00042816886067187365, "dpath": 0.001288668454253128, "glas": 0.006710641261407552, "pannuke": 0.003997694726353196},
+          "completed_low_lr_endpoint": {
+            "learning_rate": 0.00003,
+            "epoch": 10,
+            "candidate": {"R2": -0.7306914220053526, "mPQ+": 0.3270666708955278, "mDQ+": 0.40596396746069874, "mSQ+": 0.7845145055748773, "bPQ": 0.5612196286741733},
+            "exact_matched_control_delta": {"R2": -0.1401392494079713, "mPQ+": 0.006207819274849924, "mDQ+": 0.008687467694438622, "mSQ+": 0.12054655751740961, "bPQ": -0.0006014154795087601},
+            "count_error_delta": {"mean_signed_error": -0.11509610876699483, "MAE": 0.28105954055321103, "absolute_error_gt_10_fraction": 0.016643225503984976, "absolute_error_gt_20_fraction": 0.001406469760900142},
+            "type_diagnostic_delta": {"GT_nucleus_NLL": 0.021757178561608637, "GT_nucleus_target_probability": -0.0182988419376221, "GT_nucleus_pixel_accuracy": -0.010595764746124336},
+            "mechanism": {"geometry_matched_nuclei_delta": -271, "correctly_typed_nuclei_delta": -894, "matched_type_accuracy_delta": -0.01068489640275705, "spurious_prediction_delta": -163, "class_PQ_deltas": {"neutrophil": 0.049731060501119424, "epithelial": 0.0003941800131290196, "lymphocyte": -0.0187856852473971, "plasma": -0.008067553078989265, "eosinophil": 0.011744383252934823, "connective": 0.00223053020830305}},
+            "source_mPQ+_deltas": {"consep": 0.018079761165215258, "crag": -0.0006791397605931393, "dpath": 0.005652463354240689, "glas": 0.01886127192357495, "pannuke": 0.024528773667568837},
+            "interpretation": "The endpoint's +0.00621 mPQ+ versus the equally under-optimized low-LR control is not a competitive gain: R2 worsens another 0.14014, binary PQ is flat-to-negative, type NLL and target probability regress, correctly typed matches fall by 894, MAE and both large-error proportions worsen, and lymphocyte/plasma PQ decline. The unusually large +0.12055 mSQ+ delta is a low-support macro artifact caused by the control's collapsed rare-class detection, not improved pooled geometry. This endpoint is not promotable."
+          },
+          "interior_lr_epoch5": {
+            "learning_rate": 0.0001,
+            "epoch": 5,
+            "candidate": {"R2": 0.45990187242055497, "mPQ+": 0.352222439930387, "mDQ+": 0.43455568493221547, "mSQ+": 0.7930179358380421, "bPQ": 0.5710400410605315},
+            "exact_matched_control_delta": {"R2": 0.024562438022943667, "mPQ+": 0.030196418329162755, "mDQ+": 0.03446914123633771, "mSQ+": 0.009284852177891878, "bPQ": 0.003331482791796292},
+            "count_error_delta": {"mean_signed_error": -0.008907641819034584, "MAE": -0.3727144866385377, "absolute_error_gt_10_fraction": -0.018518518518518517, "absolute_error_gt_20_fraction": -0.003984997655883726},
+            "type_diagnostic_delta": {"GT_nucleus_NLL": -0.06614116192421737, "GT_nucleus_target_probability": -0.004308813752816332, "GT_nucleus_pixel_accuracy": 0.00200169932510863},
+            "mechanism": {"geometry_matched_nuclei_delta": 421, "correctly_typed_nuclei_delta": 689, "matched_type_accuracy_delta": 0.005413310105443658, "spurious_prediction_delta": -177, "class_PQ_deltas": {"neutrophil": 0.018618913745050855, "epithelial": 0.0035257039216079478, "lymphocyte": 0.010840956193871265, "plasma": 0.11438900242454836, "eosinophil": 0.025980689620515585, "connective": 0.007823244069381896}},
+            "source_mPQ+_deltas": {"consep": 0.04326177037028894, "crag": 0.030550483257612004, "dpath": 0.027306410942099513, "glas": 0.03496130446316259, "pannuke": 0.027291862358415353},
+            "interpretation": "This is the first broad focal-only signal in a competitive LR regime: both leaderboard metrics, DQ, SQ, binary geometry, all six class PQ values, all five source mPQ values, correctly typed matches, MAE, and >10/>20 outlier prevalence improve against the exact epoch-5 ordinary-loss control. Plasma is the largest driver but not the only one. Absolute scores remain below the independently selected ordinary-loss endpoints, so epoch 10 and the complete LR family remain mandatory; weighting-only already demonstrated that a coherent midpoint can reverse."
+          },
+          "interior_lr_epoch10": {
+            "learning_rate": 0.0001,
+            "epoch": 10,
+            "candidate": {"R2": 0.5231257732340912, "mPQ+": 0.3732556202464037, "mDQ+": 0.45978420642157375, "mSQ+": 0.7978877936784987, "bPQ": 0.5891713009663395},
+            "exact_matched_control_delta": {"R2": -0.06942199497470292, "mPQ+": -0.0018468199663759233, "mDQ+": -0.0023910753759131542, "mSQ+": 0.0003772734347914364, "bPQ": 0.00039912256255580925},
+            "delta_vs_independently_selected_ordinary_loss": {"R2": -0.10906312216789208, "mPQ+": -0.00571496835418304, "mDQ+": -0.005989464981798436, "mSQ+": 0.002037936577055497},
+            "count_error_delta": {"mean_signed_error": 0.2796530707923113, "MAE": -0.02320675105485215, "absolute_error_gt_10_fraction": -0.000703234880450071, "absolute_error_gt_20_fraction": -0.000703234880450071, "under_error_lt_minus_10_fraction": -0.003984997655883733, "over_error_gt_10_fraction": 0.0032817627754336692},
+            "type_diagnostic_delta": {"GT_nucleus_NLL": -0.014391766048205357, "GT_nucleus_target_probability": -0.0004040696709302072, "GT_nucleus_pixel_accuracy": 0.005892827359912034},
+            "mechanism": {"geometry_matched_nuclei_delta": 580, "correctly_typed_nuclei_delta": 261, "matched_type_accuracy_delta": -0.003321500504765984, "spurious_prediction_delta": 849, "class_PQ_deltas": {"neutrophil": -0.002229097294472543, "epithelial": -0.00036376258734388545, "lymphocyte": 0.005499095797513953, "plasma": -0.011609441013317345, "eosinophil": 0.0029665730823563163, "connective": -0.00534428778299223}, "class_R2_deltas": {"neutrophil": 0.014936663771409453, "epithelial": -0.002846428578851423, "lymphocyte": -0.0037393121611637437, "plasma": 0.009021624965282138, "eosinophil": -0.4575989294589945, "connective": 0.02369441161410013}},
+            "source_deltas": {"consep": {"R2": 0.21258478193131727, "mPQ+": -0.0020126431232774245}, "crag": {"R2": -0.14298684882281965, "mPQ+": -0.00942839466628026}, "dpath": {"R2": -0.030794777343216007, "mPQ+": 0.0050740446279248785}, "glas": {"R2": 0.0963758971916395, "mPQ+": -0.004515858376822723}, "pannuke": {"R2": -0.14706392900708298, "mPQ+": 0.00015606290307101922}},
+            "interpretation": "The broad epoch-5 gain turns over. At epoch 10, mPQ+/mDQ+ and R2 lose to the exact control; the count regression is dominated by eosinophil SSE and CRAG, while 849 extra spurious predictions and lower matched-type accuracy offset more geometry matches. Aggregate >10 prevalence is nearly flat only because fewer large undercounts are replaced by more large overcounts. The candidate also loses both independently selected leaderboard metrics, so the epoch-5 transient is not an early-stopping promotion case."
+          },
+          "upper_lr_epoch5": {
+            "learning_rate": 0.0003,
+            "epoch": 5,
+            "candidate": {"R2": 0.5226583745231502, "mPQ+": 0.3593346035646287, "mDQ+": 0.43808367877845034, "mSQ+": 0.8077351917321606, "bPQ": 0.5818745424145395},
+            "exact_matched_control_delta": {"R2": 0.10739382919784657, "mPQ+": 0.007956914930289383, "mDQ+": 0.007848514181736155, "mSQ+": 0.0011566152427375798, "bPQ": -0.00006698319934717034},
+            "delta_vs_independently_selected_ordinary_loss": {"R2": -0.1095305208788331, "mPQ+": -0.019635985035958026, "mDQ+": -0.027689992624921874, "mSQ+": 0.01188533463071746},
+            "count_error_delta": {"mean_signed_error": -0.2088607594936711, "MAE": -0.1404125644631975, "absolute_error_gt_10_fraction": -0.011017346460384436, "absolute_error_gt_20_fraction": -0.0023441162681669125, "under_error_lt_minus_10_fraction": -0.003984997655883733, "over_error_gt_10_fraction": -0.00703234880450071},
+            "type_diagnostic_delta": {"GT_nucleus_NLL": -0.03158009233816461, "GT_nucleus_target_probability": 0.010512327958954293, "GT_nucleus_pixel_accuracy": 0.014626600137339962},
+            "mechanism": {"geometry_matched_nuclei_delta": -509, "correctly_typed_nuclei_delta": -543, "matched_type_accuracy_delta": -0.002047950958462774, "spurious_prediction_delta": -605, "class_PQ_deltas": {"neutrophil": -0.0025664796356294345, "epithelial": -0.003027907625642645, "lymphocyte": -0.0017154690623064628, "plasma": 0.05336349475868618, "eosinophil": 0.0024050344242088906, "connective": -0.0007171832775803022}, "class_R2_deltas": {"neutrophil": 0.022999818550666018, "epithelial": -0.0366966876024053, "lymphocyte": 0.022931631114149975, "plasma": 0.11688090458717659, "eosinophil": 0.6025807684955076, "connective": -0.08433345995801567}},
+            "source_deltas": {"consep": {"R2": 0.02599475411944796, "mPQ+": -0.003621340186903743}, "crag": {"R2": 0.03686077494645412, "mPQ+": 0.009599667334264927}, "dpath": {"R2": 0.10467076775737122, "mPQ+": 0.009401359789814767}, "glas": {"R2": 0.9086307346712648, "mPQ+": -0.006219020533588415}, "pannuke": {"R2": 0.24265964788885824, "mPQ+": -0.006255363699574301}},
+            "interpretation": "The upper-LR midpoint improves paired R2 and mPQ+, calibration, MAE, bias, and both directional large-error tails, but it is not broad or competitive. Eosinophil supplies +0.60258 class R2 and GLaS shows a very large control rescue; plasma alone supplies +0.05336 PQ while four class PQ values regress. Absolute scores remain well below the independently selected ordinary endpoint, and fewer spurious predictions come with fewer geometry/correctly typed matches. Epoch 10 is required."
+          },
+          "upper_lr_epoch10": {
+            "learning_rate": 0.0003,
+            "epoch": 10,
+            "candidate": {"R2": -0.08185538115488449, "mPQ+": 0.36572831202487327, "mDQ+": 0.44730728586494833, "mSQ+": 0.8014784040941377, "bPQ": 0.5958528495824462},
+            "exact_matched_control_delta": {"R2": -0.7140442765568678, "mPQ+": -0.013242276575713474, "mDQ+": -0.01846638553842389, "mSQ+": 0.00562854699269455, "bPQ": -0.0017886749729117968},
+            "count_error_delta": {"mean_signed_error": 0.171589310829817, "MAE": 0.585560243788092, "absolute_error_gt_10_fraction": 0.011251758087201136, "absolute_error_gt_20_fraction": 0.0032817627754336623, "under_error_lt_minus_10_fraction": 0.009610876699484294, "over_error_gt_10_fraction": 0.0016408813877168416},
+            "type_diagnostic_delta": {"GT_nucleus_NLL": 0.07168686864968787, "GT_nucleus_target_probability": -0.024398091871747685, "GT_nucleus_pixel_accuracy": -0.017248188529780717},
+            "mechanism": {"geometry_matched_nuclei_delta": 114, "correctly_typed_nuclei_delta": -839, "matched_type_accuracy_delta": -0.014424700303887983, "spurious_prediction_delta": 669, "class_PQ_deltas": {"neutrophil": -0.019106014173514624, "epithelial": -0.0040789807027917235, "lymphocyte": 0.0024937423329710606, "plasma": -0.0060470609341069514, "eosinophil": -0.03372841782639037, "connective": -0.01898692815044828}},
+            "source_mPQ+_deltas": {"consep": 0.026809852799947853, "crag": -0.026472447990205594, "dpath": -0.00294316641002651, "glas": -0.012787641845286746, "pannuke": 0.008498521390888025},
+            "interpretation": "The upper-LR midpoint rescue does not persist. At epoch 10, R2 collapses, mPQ+/mDQ+/bPQ decline, five class PQ values regress, type NLL and target probability worsen, and both under- and over-count >10 tails increase. This is surrogate misalignment rather than conventional validation-loss overfitting: focal validation loss improves from 4.71844 at epoch 5 to 4.62928 at epoch 10 while R2 falls from 0.52266 to -0.08186. More geometry matches do not help because correctly typed matches and matched-type accuracy fall while spurious predictions rise; CRAG and GLaS are the principal supported source regressions."
+          },
+          "focal_only_final_selection": {
+            "evaluation_set": "711-patch source-group-disjoint development validation",
+            "selected_R2": {"learning_rate": 0.0001, "epoch": 10, "R2": 0.5231257732340912, "delta_vs_independently_selected_ordinary_loss": -0.10906312216789216},
+            "selected_mPQ+": {"learning_rate": 0.0001, "epoch": 10, "mPQ+": 0.3732556202464037, "mDQ+": 0.45978420642157375, "mSQ+": 0.7978877936784987, "delta_vs_independently_selected_ordinary_loss": {"mPQ+": -0.005714968354183059, "mDQ+": -0.005989464981798476, "mSQ+": 0.0020379365770555324}},
+            "selection_boundary": "Both selected metrics are at epoch 10, but no horizon extension is warranted because the independently selected endpoints lose both leaderboard metrics and mDQ+, and the exact upper-LR endpoint confirms worsening calibration, typing, source stability, and directional tails.",
+            "decision": "reject standalone and reject composition with class-aware sampling"
+          },
+          "interpretation": "The complete three-LR focal-only family is negative. Interior LR 1e-4 gives a broad epoch-5 exact-control gain, and upper LR 3e-4 gives a narrower eosinophil/GLaS/plasma rescue, but neither is competitive with the independently selected ordinary recipe and both reverse relative to matched controls by epoch 10. The focal validation objective continues improving, so the reversal is evidence of pixel-loss/leaderboard-metric misalignment rather than a conventional rising-validation-loss overfit. Independently selected focal endpoints lose 0.10906 R2, 0.00571 mPQ+, and 0.00599 mDQ+. Fixed gamma-2 focal loss is rejected rather than promoted by early stopping."
+        },
+        "weighting_focal_combination_interim": {
+          "evaluation_set": "711-patch source-group-disjoint development validation · rho 3 plus focal gamma 2; low/interior trajectories complete, upper-LR endpoint pending",
+          "low_lr_epoch10": {
+            "candidate": {"R2": 0.18867465490027338, "mPQ+": 0.3423461946457609, "mDQ+": 0.42597068572456265, "mSQ+": 0.78199200822473, "bPQ": 0.5618417350037397},
+            "exact_matched_control_delta": {"R2": 0.7792268274976547, "mPQ+": 0.021487343025082983, "mDQ+": 0.02869418595830253, "mSQ+": 0.1180240601672623, "bPQ": 0.000020690850057625276},
+            "delta_vs_independently_selected_ordinary_loss": {"R2": -0.4435142405017099, "mPQ+": -0.03662439395482583, "mDQ+": -0.03980298567880955, "mSQ+": -0.013857848876713176},
+            "count_error_delta": {"mean_signed_error": -0.185888420065635, "MAE": -0.30496952648851394, "absolute_error_gt_10_fraction": -0.006094702297233939, "absolute_error_gt_20_fraction": -0.001406469760900142, "under_error_lt_minus_10_fraction": 0.001406469760900142, "over_error_gt_10_fraction": -0.007501172058134067},
+            "type_diagnostic_delta": {"GT_nucleus_NLL": 0.05862311453390179, "GT_nucleus_target_probability": -0.017923989581493993, "GT_nucleus_pixel_accuracy": -0.014983613222755432},
+            "mechanism": {"geometry_matched_nuclei_delta": -349, "correctly_typed_nuclei_delta": -148, "matched_type_accuracy_delta": 0.002167031237722994, "spurious_prediction_delta": -506, "class_PQ_deltas": {"neutrophil": 0.06947194066687766, "epithelial": -0.00036741326588507484, "lymphocyte": 0.009259163584137142, "plasma": 0.01022208019768811, "eosinophil": 0.0364390776194435, "connective": 0.003899209348236843}},
+            "additivity_check": {"combined_exact_delta_mPQ+": 0.021487343025082983, "weighting_exact_delta_mPQ+": 0.017837968710694152, "focal_exact_delta_mPQ+": 0.006207819274849924, "sum_of_isolated_deltas": 0.024045787985544076, "interpretation": "subadditive rescue in a pathological low-learning-rate regime, not positive synergy"},
+            "interpretation": "The combination improves rare-class PQ and count tails relative to an under-optimized exact control, but remains far below independently selected ordinary loss. Its low-LR mPQ gain is smaller than the sum of the two isolated low-LR gains, while instance type NLL, target probability, and pixel accuracy regress. This endpoint is not promotable; LR 1e-4 and 3e-4 determine whether any competitive interaction exists."
+          },
+          "interior_lr_epoch5": {
+            "candidate": {"R2": 0.5186340482539781, "mPQ+": 0.3393660632074311, "mDQ+": 0.41845269984129585, "mSQ+": 0.7935100557224062, "bPQ": 0.5706428505277858},
+            "exact_matched_control_delta": {"R2": 0.08329461385636677, "mPQ+": 0.01734004160620689, "mDQ+": 0.01836615614541809, "mSQ+": 0.009776972062255918, "bPQ": 0.0029342922590506193},
+            "count_error_delta": {"mean_signed_error": -0.3818565400843883, "MAE": -0.613924050632912, "absolute_error_gt_10_fraction": -0.02062822315986873, "absolute_error_gt_20_fraction": -0.012423816221284578, "under_error_lt_minus_10_fraction": -0.005625879043600568, "over_error_gt_10_fraction": -0.015002344116268163},
+            "type_diagnostic_delta": {"GT_nucleus_NLL": 0.03413348078900946, "GT_nucleus_target_probability": -0.021488271506388767, "GT_nucleus_pixel_accuracy": -0.020054455285441697},
+            "mechanism": {"geometry_matched_nuclei_delta": -272, "correctly_typed_nuclei_delta": 542, "matched_type_accuracy_delta": 0.01198470273687502, "spurious_prediction_delta": -1474, "class_PQ_deltas": {"neutrophil": 0.023525129345860485, "epithelial": 0.006773701480997152, "lymphocyte": 0.010560876380796946, "plasma": 0.0821595137408555, "eosinophil": -0.02714575480997633, "connective": 0.008166783498707475}},
+            "source_mPQ+_deltas": {"consep": -0.003863411676561457, "crag": 0.010566580337546871, "dpath": 0.02405145746640841, "glas": 0.013523516964243254, "pannuke": 0.03303521762874678},
+            "additivity_check": {"combined_exact_delta_mPQ+": 0.01734004160620689, "weighting_exact_delta_mPQ+": 0.02704514605773034, "focal_exact_delta_mPQ+": 0.030196418329162755, "interpretation": "the combination is weaker than either isolated loss at this checkpoint"},
+            "interpretation": "R2, pooled typed metrics, binary geometry, MAE, both directional tails, correctly typed matches, and most class/source PQ values improve against the exact midpoint control. However, eosinophil PQ regresses, CoNSeP SQ collapses on only 12 patches, calibration diagnostics worsen, and the combined mPQ gain is smaller than either isolated intervention. This is a coherent midpoint effect but not synergy or a selected recipe; epoch 10 remains mandatory."
+          },
+          "interior_lr_epoch10": {
+            "candidate": {"R2": -0.2060618699296123, "mPQ+": 0.3529218063390716, "mDQ+": 0.43439793437163504, "mSQ+": 0.7968043688085715, "bPQ": 0.5875913369361916},
+            "exact_matched_control_delta": {"R2": -0.7986096381384064, "mPQ+": -0.022180633873708, "mDQ+": -0.02777734742585186, "mSQ+": -0.000706151435135749, "bPQ": -0.0011808414675921197},
+            "count_error_delta": {"mean_signed_error": 0.412095639943741, "MAE": 0.6872948898265356, "absolute_error_gt_10_fraction": 0.021097046413502102, "absolute_error_gt_20_fraction": 0.0, "under_error_lt_minus_10_fraction": 0.010782934833567744, "over_error_gt_10_fraction": 0.010314111579934365},
+            "type_diagnostic_delta": {"GT_nucleus_NLL": 0.19233908066303895, "GT_nucleus_target_probability": -0.052754055811062184, "GT_nucleus_pixel_accuracy": -0.048847362460189614},
+            "mechanism": {"geometry_matched_nuclei_delta": 612, "correctly_typed_nuclei_delta": -1332, "matched_type_accuracy_delta": -0.028513513392521284, "spurious_prediction_delta": 1225, "extra_spurious_neutrophils": 1590, "class_PQ_deltas": {"neutrophil": -0.06392453739868299, "epithelial": -0.000517013534906019, "lymphocyte": -0.007689276334097217, "plasma": -0.026617367963882144, "eosinophil": -0.008393912425578187, "connective": -0.025941695585101232}, "source_mPQ+_deltas": {"consep": 0.00690739781258104, "crag": -0.0232226273168189, "dpath": -0.0213333399388817, "glas": -0.025287981893745037, "pannuke": -0.02050434405355206}},
+            "additivity_check": {"combined_exact_delta_R2": -0.7986096381384064, "sum_of_isolated_exact_delta_R2": -0.15052362918114217, "combined_exact_delta_mPQ+": -0.022180633873708, "weighting_exact_delta_mPQ+": -0.006704339957080918, "focal_exact_delta_mPQ+": -0.0018468199663759233, "sum_of_isolated_exact_delta_mPQ+": -0.008551159923456842, "interpretation": "strong negative interaction, not additive optimization noise"},
+            "interpretation": "The coherent epoch-5 effect catastrophically reverses at the predeclared endpoint. All six class PQ values and four of five source mPQ values decline; the only positive source is the 12-patch CoNSeP stratum. Rare-class weighting plus focal emphasis jointly floods the decoder with neutrophil alternatives: spurious neutrophils rise by 1,590 and connective-to-neutrophil and lymphocyte-to-neutrophil swaps rise by 851 and 701. More geometry matches cannot compensate for 1,332 fewer correctly typed nuclei, 1,225 more spurious predictions, materially worse calibration, and higher large under- and over-count prevalence. The combination is much worse than the sum of the isolated endpoint losses, so the interaction is antagonistic and cannot trigger smoothing or sampling composition."
+          },
+          "upper_lr_epoch5": {
+            "candidate": {"R2": 0.5050712768204678, "mPQ+": 0.3591439765051508, "mDQ+": 0.43754808574259935, "mSQ+": 0.80753507333589, "bPQ": 0.5796808249950467},
+            "exact_matched_control_delta": {"R2": 0.08980673149516416, "mPQ+": 0.007766287870811461, "mDQ+": 0.007312921145885165, "mSQ+": 0.0009564968464670365, "bPQ": -0.0022607006188399836},
+            "delta_vs_independently_selected_ordinary_loss": {"R2_for_current_selected_combination_recipe": -0.11355484714800523, "mPQ+": -0.019826612095435958, "mDQ+": -0.02822558566077288, "mSQ+": 0.011685216234446849},
+            "count_error_delta": {"mean_signed_error": 0.21729957805907185, "MAE": 0.5084388185654003, "absolute_error_gt_10_fraction": 0.008204406938584152, "absolute_error_gt_20_fraction": 0.018049695264885132, "under_error_lt_minus_10_fraction": -0.004453820909517112, "over_error_gt_10_fraction": 0.01265822784810125, "over_error_gt_20_fraction": 0.013361462728551335},
+            "type_diagnostic_delta": {"GT_nucleus_NLL": 0.1395738212363986, "GT_nucleus_target_probability": -0.012268401458532918, "GT_nucleus_pixel_accuracy": -0.008888621426904053},
+            "mechanism": {"matched_type_accuracy_delta": -0.007521655273455385, "class_PQ_deltas": {"neutrophil": 0.004165884076598236, "epithelial": -0.008000745089170258, "lymphocyte": -0.009403863006406166, "plasma": 0.05055855571435991, "eosinophil": 0.003835533478534242, "connective": 0.005442362050953109}, "source_mPQ+_deltas": {"consep_n12": -0.00858618948451717, "crag": 0.0059468039182472565, "dpath": 0.008081237029046784, "glas": 0.0076259480343136565, "pannuke_n12": 0.030404336252810082}},
+            "additivity_check": {"combined_exact_delta_mPQ+": 0.007766287870811461, "weighting_exact_delta_mPQ+": 0.0011746513039618822, "focal_exact_delta_mPQ+": 0.007956914930289383, "interpretation": "the combination is slightly worse than focal alone; weighting adds no useful marginal effect"},
+            "interpretation": "The paired leaderboard movement is not a broad or competitive gain. Plasma supplies nearly all typed improvement while epithelial and lymphocyte PQ decline; binary PQ/AJI, type NLL, target probability, pixel accuracy, matched typing accuracy, MAE, and large overcount tails regress. The combined mPQ effect is slightly smaller than focal-only at the same LR/epoch, and absolute mPQ remains 0.01983 below independently selected ordinary loss. Epoch 10 completes the grid but this midpoint cannot rescue the interaction."
+          },
+          "upper_lr_epoch10": {
+            "evaluation_set": "711-patch source-group-disjoint development validation",
+            "candidate": {"learning_rate": 0.0003, "epoch": 10, "R2": 0.6358420104517678, "mPQ+": 0.38666669334516574, "mDQ+": 0.4728385835057261, "mSQ+": 0.805442890951911, "bPQ": 0.5973755172010281},
+            "exact_and_independently_selected_control_delta": {"R2": 0.0036531150497844944, "mPQ+": 0.007696104744578991, "mDQ+": 0.007064912102353882, "mSQ+": 0.009593033850467836, "bPQ": -0.0002660073543299113},
+            "count_error_delta": {"mean_signed_error": -0.0194561650257854, "MAE": 0.33263009845288405, "absolute_error_gt_10_fraction": 0.005625879043600568, "absolute_error_gt_20_fraction": 0.004688232536333804, "under_error_lt_minus_10_fraction": 0.008204406938584152, "over_error_gt_10_fraction": -0.0025785278949835844},
+            "type_diagnostic_delta": {"GT_nucleus_NLL": 0.11108059663579795, "GT_nucleus_target_probability": -0.022053429185474482, "GT_nucleus_pixel_accuracy": -0.01868466973387839},
+            "mechanism": {"geometry_matched_nuclei_delta": -259, "correctly_typed_nuclei_delta": -351, "matched_type_accuracy_delta": -0.0021522562302068726, "spurious_prediction_delta": -191, "class_PQ_deltas": {"neutrophil": 0.02075175489812802, "epithelial": -0.00367701976958452, "lymphocyte": 0.015827198861570825, "plasma": 0.0010493044898844237, "eosinophil": 0.027289924987166636, "connective": -0.015064022063690008}, "source_mPQ+_deltas": {"consep_n12": 0.026007, "crag": 0.006541, "dpath": 0.004868, "glas": 0.011408, "pannuke_n12": 0.012656}},
+            "interaction_vs_isolated_selected_endpoints": {"combined_delta_mPQ+": 0.007696104744578991, "sum_of_weighting_and_focal_deltas_mPQ+": -0.008551159923456841, "interaction_mPQ+": 0.016247264668035832, "combined_delta_mDQ+": 0.007064912102353882, "sum_of_weighting_and_focal_deltas_mDQ+": -0.008805496143959757},
+            "interpretation": "Unlike the failed LR 1e-4 endpoint, LR 3e-4 retains a typed gain at both epochs 5 and 10 versus the exact 3e-4 control. The endpoint improves mPQ+, mDQ+, and mSQ+ across every source aggregate, with macro movement concentrated in neutrophil, lymphocyte, and eosinophil while epithelial and connective PQ soften. Binary geometry is essentially unchanged. The expanded ordinary-loss control subsequently reaches mPQ+ 0.39047 at LR 6e-4, above the combined recipe's selected 0.38667; therefore this exact-checkpoint gain is an LR-response shift and cannot support promotion."
+          },
+          "conditional_label_smoothing_endpoint": {
+            "evaluation_set": "711-patch source-group-disjoint development validation",
+            "candidate": {"learning_rate": 0.0003, "epoch": 10, "R2": 0.48704003159808734, "mPQ+": 0.3638142513229144, "mDQ+": 0.4469208175182288, "mSQ+": 0.7953833588671312},
+            "delta_vs_unsmoothed_combination": {"R2": -0.14880197885368046, "mPQ+": -0.02285244202225134, "mDQ+": -0.025917765987497288, "mSQ+": -0.010059532084779832},
+            "decision": "Reject smoothing. Its entropy changes do not translate into typed detection or segmentation quality; use the pure weighting-plus-focal recipe for LR expansion."
+          }
+        },
+        "interpretation": "Weighting-only, focal-only, and 0.05 label smoothing are rejected. The pure weighting-plus-focal interaction is LR-sensitive and improves the exact LR 3e-4 control, but the expanded ordinary-loss control selects LR 6e-4 and exceeds the candidate's selected mPQ+ by 0.00380 and mDQ+ by 0.00697. At the exact 6e-4 endpoint the combination loses five of six class PQ values, DPath mPQ+ by 0.02438, 614 correctly typed nuclei, and calibration while increasing >+10 overcount prevalence by 2.11 percentage points. E44 is rejected for both objectives and must not enter E46 composition."
+      },
+      "implementation_validation": {
+        "zero_setting_recovers_ordinary_cross_entropy": true,
+        "foreground_weights_normalized_separately_from_background": true,
+        "validation_or_test_frequencies_used": false,
+        "exact_selected_lr_epoch_control_lookup": true,
+        "binary_geometry_directional_tail_and_major_source_promotion_audit": true,
+        "smoothing_requires_exact_and_independently_selected_pure_combination_typed_gain": true,
+        "pipeline_tests": "full pipeline suite passed, including queue-order, loss-zero-equivalence, and deployment-safety checks"
+      },
+      "planned_gate": "E42 is complete and rejected; E37 remains the positive exposure control. Keep label smoothing out of the primary combination so weighting-focal synergy is identifiable; admit smoothing only as a validation-gated marginal add-on. Only test sampling plus focal composition if both isolated interventions improve rare-class DQ under their independently selected learning rates.",
+      "guardrail": "Reject mPQ-specific gains driven by binary-geometry loss, source-specific collapse, lower SQ, or an unexpanded LR boundary. Report directional count tails, but do not use the count metric to veto a separate segmentation model selected specifically for mPQ+.",
+      "artifacts": {
+        "queue_script": "scripts/run_hovernet_type_focal_pilot_queue.py",
+        "planned_summary": "outputs/conic_type_loss_pilots/e44_type_focal_summary.json",
+        "lr_expansion_queue": "scripts/run_hovernet_e44_lr_expansion_queue.py",
+        "planned_lr_expansion_summary": "outputs/conic_type_loss_lr_expansion/e44_lr_expansion_summary.json"
+      }
+    },
+    {
+      "id": "E45",
+      "name": "hovernet_class_sampling_intensity_refinement",
+      "status": "implementation validated; waiter serialized after E43 diagnostic backfill",
+      "change": "Reduce E37's fixed class-aware replacement-sampling mass from 0.5 to 0.25 or 0.10 while preserving the seed, split, architecture, optimizer-step budget, and official augmentation/loss recipe.",
+      "selection_metric": "development-validation mPQ+ and R2 selected independently; each fraction receives its own full LR bracket and two-epoch metric cadence",
+      "causal_trigger": {
+        "evaluation_set": "711-patch source-group-disjoint development validation",
+        "class_0.5_lr_1e-4_epoch_10_vs_uniform": {
+          "delta_mPQ+": 0.04312867582370683,
+          "delta_mDQ+": 0.053899560544126646,
+          "delta_mSQ+": -0.0037452109200111217,
+          "delta_R2": -0.06923052118897954
+        },
+        "interpretation": "The 0.5 intervention passes the mPQ/DQ/SQ gate but fails R2 and worsens count tails, so intensity—not composition—is the next isolated variable."
+      },
+      "planned_grid": {
+        "fractions": [0.25, 0.10],
+        "learning_rates": [0.00003, 0.0001, 0.0003],
+        "epochs": 10,
+        "metric_every_epochs": 2,
+        "practical_control": "exact seed-206 ordinary uniform E37 grid without replacement",
+        "mechanism_control": "new seed-206 uniform-with-replacement grid at every learning rate",
+        "total_runs": 9
+      },
+      "queue_order": "Wait for the E43-specific validation-backfill marker, then run all six candidates serially. This preserves the existing E41/E42/E44→E43 chain and prevents GPU overlap.",
+      "planned_next_gate": "A lower fraction is an mPQ candidate only if its validation-selected mPQ/mDQ each beat both independently selected ordinary uniform and uniform-with-replacement controls by >0.003, both mSQ losses are under 0.005, CRAG/DPath/GLaS mPQ/mDQ/mSQ stay above -0.01 versus both controls, and its learning-rate/horizon selection is confirmed off a boundary. This separates class-exposure benefit from replacement/duplication regularization without hiding source collapse. Count tails do not veto that metric-specific route. A separate early-heavy tail-repair/Pareto screen additionally requires improved absolute signed bias versus class-0.5, improvement in at least one >10/>20 outlier proportion, and no material MAE/outlier regression. Replacing class-0.5 for mPQ also requires mPQ and mDQ within 0.005 of its frontier.",
+      "sampler_prior_correction": {
+        "scope": "Use realized per-epoch development-training nucleus exposure to correct the artificial replacement-sampling prior back toward the natural development-training nucleus prior. This is not supervised estimation of locked-test frequencies.",
+        "strength_grid": [0.0, 0.25, 0.5, 0.75, 1.0],
+        "validation": "Select correction strength excluding each institution, route each held institution through its excluded-source choice, and require pooled out-of-source mPQ/mDQ improvement, mSQ safety, stable held-source strengths, and no mPQ/mDQ/mSQ regression below -0.01 in CRAG, DPath, or GLaS. Count tails remain a separate R2/reliability diagnostic and do not veto mPQ correction.",
+        "integration": "Correction is now part of the E45 promotion report rather than an unconsumed side artifact."
+      },
+      "guardrail": "WeightedRandomSampler changes both class exposure and replacement behavior: on the exact development-training fold, class fractions 0.10/0.25/0.50 have expected unique-patch fractions 0.630/0.622/0.597 per epoch, while ordinary sampling sees every patch. Require the uniform-with-replacement mechanism control before attributing a gain to class weighting. Do not select a fraction at the 0.5 model's LR without checking its own LR response. Report under- and over-count tails separately, distinguish a safer Pareto candidate from the outright mPQ winner, and keep this endpoint out of the R2 recipe unless its independently selected count score and tails pass. Do not combine with rejected E44 weighting/focal loss.",
+      "artifacts": {
+        "queue_script": "scripts/run_hovernet_class_sampling_fraction_queue.py",
+        "planned_summary": "outputs/conic_class_sampling_refinement/e37_class_fraction_summary.json",
+        "serialization_marker": "outputs/conic_validation_diagnostic_backfill/backfill_e43_complete.json"
+      }
+    },
+    {
+      "id": "E46",
+      "name": "metric_specific_validation_gated_composition",
+      "status": "raw-map inference and metric-specific gates implemented; robust count-correction pilot is a held Pareto candidate, membership still awaits E41-E45 artifacts",
+      "change": "Build separate mPQ+ and R2 recipes from validation-qualified endpoints instead of forcing one model or fusion rule to optimize both leaderboard metrics.",
+      "evaluation_set": "711-patch source-group-disjoint development validation for membership and weight selection; locked test remains untouched until recipes are frozen",
+      "pilot_result": {
+        "evaluation_set": "711-patch source-group-disjoint development validation",
+        "scope": "robust R2 count-correction subcandidate only; no locked-test inference"
+      },
+      "selection_metric": "mPQ+ branch: development-validation pooled mPQ+ over a bounded pre-decoder map-weight grid, with DQ/SQ guardrails. R2 branch: classwise development-validation R2 over a bounded count-weight grid, with leave-one-source-out residual and tail checks.",
+      "mpq_recipe": {
+        "candidate_gate": "A member must be competitive alone, improve pooled mPQ+ and mDQ+ by more than 0.003 without an mSQ+ loss beyond 0.005, retain a stable blend weight when each source is excluded, avoid mPQ+/mDQ+/mSQ+ regressions below -0.01 in CRAG, DPath, or GLaS, and exhibit nonredundant per-class/source TP-FP-FN or confusion errors. Count tails are reported but cannot veto this fixed-geometry mPQ route.",
+        "fusion": "First screen shared NP/HV/TP checkpoint weights. If a candidate improves typing but fails the geometry/SQ guardrail, preserve the selected geometry model's decoded instances and validation-sweep instance-matched type probabilities; branch-specific pre-decoder TP weights remain available if that cheaper fixed-geometry screen passes.",
+        "initial_weight_grid": [0.25, 0.5, 0.75],
+        "selection": "Maximize development-validation mPQ+; use mDQ+, mSQ+, rare-class false-positive tails, and worst-source behavior as guardrails rather than secondary tuning targets."
+      },
+      "r2_recipe": {
+        "candidate_gate": "Report standalone candidate improvement separately from composition. A blend qualifies only if leave-one-source-out class weights beat the better endpoint by >0.003 R2, the full-validation gain is also >0.003, the full-versus-held-source gap is at most 0.02, MAE, absolute signed bias, and >10/>20 outlier prevalence stay within predeclared tolerances, and no supported source×class true-zero stratum increases its >10 or >20 false-count prevalence beyond a support-aware tolerance of max(base rate, two patches / stratum support).",
+        "fusion": "Validation-select bounded count-vector weights independently by class, while retaining the separately selected mPQ+ masks and types.",
+        "initial_weight_grid": [0.0, 0.25, 0.5, 0.75, 1.0],
+        "stability_check": "Compare full-validation weights with leave-one-source-out selections and report signed bias, MAE, and absolute-error outlier fractions at 5, 10, and 20 cells. Separately report true-zero support and false-count prevalence overall, by class, by source, and by source×class; supported strata gate admission at >10 and >20 cells.",
+        "robust_count_correction_pilot": {
+          "evaluation_set": "711-patch source-group-disjoint development validation; no test inference",
+          "method": "Retain the E33 classwise convex count weights, but cap auxiliary additions and removals separately in multiples of sqrt(mask_count+1). Positive caps prevent the auxiliary stream from inventing many cells without mask support; negative caps can remain looser where the auxiliary stream reliably removes mask overcounts.",
+          "selection": "For each class, select the ordinary E32/E28 convex weight first, then select positive and negative cap scales on validation R2 subject to the supported source×class true-zero >10/>20 gate. Repeat both stages inside five source-stratified GroupKFold splits and in leave-one-institution-out analysis.",
+          "full_validation": {
+            "E33_R2": 0.8644409850065905,
+            "robust_R2": 0.8661714757726412,
+            "delta_R2": 0.0017304907660506963,
+            "delta_MAE": -0.04289732770745447,
+            "delta_mean_signed_error": -0.09821847163619313,
+            "delta_absolute_error_gt_10_fraction": -0.0025785278949835913,
+            "delta_absolute_error_gt_20_fraction": -0.001172058134083451,
+            "all_supported_true_zero_strata_pass": true
+          },
+          "dpath_zero_epithelial": {
+            "support": 47,
+            "raw_hovernet_over_10_fraction": 0.0425531914893617,
+            "E33_over_10_fraction": 0.2978723404255319,
+            "robust_over_10_fraction": 0.0851063829787234,
+            "raw_hovernet_over_20_fraction": 0.0,
+            "E33_over_20_fraction": 0.1702127659574468,
+            "robust_over_20_fraction": 0.0
+          },
+          "nested_group_cv": {
+            "ordinary_E33_R2": 0.8512005377472973,
+            "robust_R2": 0.8550342729364996,
+            "delta_R2": 0.0038337351892022697,
+            "paired_group_bootstrap_95_CI": [-0.004161325731682139, 0.008126242394049027],
+            "bootstrap_fraction_positive": 0.7175,
+            "delta_MAE": 0.030004688232536658,
+            "delta_absolute_error_gt_10_fraction": 0.0016408813877168277,
+            "delta_absolute_error_gt_20_fraction": 0.0004688232536333818
+          },
+          "leave_one_source_out": {
+            "ordinary_R2": 0.8481170757511166,
+            "robust_R2": 0.8552624360441031,
+            "delta_R2": 0.007145360292986513,
+            "worst_source_delta_R2": {"source": "GLaS", "delta": -0.022749284103834144}
+          },
+          "decision": "Retain as a reliability-oriented Pareto candidate, but do not replace E33 or run locked-test inference yet. Its full-validation gain is below the predeclared +0.003 practical threshold, the nested bootstrap CI crosses zero, three of five CV folds regress, and OOF general-error tails rise slightly despite much safer true-zero behavior."
+        }
+      },
+      "implementation_validation": {
+        "weighted_checkpoint_maps_before_decoder": true,
+        "independent_np_hv_tp_checkpoint_weights": true,
+        "fixed_geometry_instance_matched_type_screen": true,
+        "E37_sampling_candidates_receive_exact_seed206_count_and_type_complementarity_screens": true,
+        "fixed_geometry_screen_refuses_locked_test_ids": true,
+        "standalone_and_blend_count_claims_separated": true,
+        "source_held_out_count_admission_gate": true,
+        "directional_tail_admission_gate": true,
+        "source_class_true_zero_outlier_prevalence_gate": true,
+        "count_tails_do_not_veto_fixed_geometry_mpq_admission": true,
+        "major_source_mpq_mdq_msq_safety_gate": true,
+        "unexpanded_training_lr_or_intervention_strength_boundary_holds_composition_admission": true,
+        "historical_single_dose_E36_E37_and_E44_candidates_are_boundary_held": true,
+        "boundary_constraints_preserved_in_pre_and_post_E45_admission": true,
+        "weights_normalized_independently_of_model_or_tta_view_count": true,
+        "uniform_default_backwards_compatible": true,
+        "full_pipeline_tests_passed": 129
+      },
+      "guardrail": "Do not blend every apparent winner. Reject candidates with redundant residuals, source-local gains, unstable class weights, upper-bound selections that have not been expanded, or improvements visible only on the retrospective internal test. Run the no-TTA pilot composition first; add six-view TTA only after membership and weights are frozen.",
+      "artifacts": {
+        "weighted_inference": "scripts/run_hovernet_control.py",
+        "fixed_geometry_type_screen": "scripts/analyze_hovernet_type_complementarity.py",
+        "count_residual_screen": "scripts/analyze_hovernet_count_complementarity.py",
+        "candidate_admission": "scripts/select_hovernet_e46_candidates.py",
+        "post_e45_admission_queue": "scripts/run_hovernet_e46_post_e45_queue.py",
+        "planned_admission_report": "outputs/conic_metric_specific_composition/e46_candidate_admission.json",
+        "planned_root": "outputs/conic_metric_specific_composition",
+        "robust_count_script": "scripts/sweep_robust_count_blend.py",
+        "robust_count_report": "outputs/conic_metric_specific_composition/e46_robust_count_blend.json"
+      }
+    }
+  ]
+}

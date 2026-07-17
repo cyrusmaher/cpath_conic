@@ -1,0 +1,48 @@
+{
+  "dataset": "CoNIC 2022",
+  "metric_definition": "Official pooled mPQ+ over the six classes and mean per-class R2; mPQ+ uses full 256x256 patches while R2 uses central 224x224 counts.",
+  "comparability_note": "Hidden-final leaderboard scores are contextual targets. The official HoVer-Net values use the authors' public group-stratified validation fold; its downloaded checkpoint will additionally be evaluated on our split for a paired comparison.",
+  "references": [
+    {
+      "name": "EPFL | StarDist",
+      "role": "final challenge leaderboard top mPQ+ reference",
+      "split": "hidden final test",
+      "mpq_plus": 0.50132,
+      "r2": null,
+      "source": "https://doi.org/10.1016/j.csbj.2024.10.046"
+    },
+    {
+      "name": "Pathology AI",
+      "role": "final challenge leaderboard top R2 reference",
+      "split": "hidden final test",
+      "mpq_plus": 0.46310,
+      "r2": 0.76413,
+      "source": "https://doi.org/10.1016/j.csbj.2024.10.046"
+    },
+    {
+      "name": "Standardized HoVer-Net pipeline",
+      "role": "publicly reported preliminary-phase reference",
+      "split": "preliminary hidden test",
+      "mpq_plus": 0.40665,
+      "r2": 0.62199,
+      "source": "https://arxiv.org/abs/2203.00171"
+    },
+    {
+      "name": "CellViT-SAM-H",
+      "role": "architecture-specific published context",
+      "split": "Lizard comparison; metric is mPQ, not official CoNIC mPQ+",
+      "mpq": 0.4980,
+      "mpq_plus": null,
+      "r2": null,
+      "source": "https://doi.org/10.1016/j.csbj.2024.10.046"
+    },
+    {
+      "name": "Official HoVer-Net baseline",
+      "role": "official public CoNIC-trained checkpoint reproducibility target",
+      "split": "authors' group/source-stratified validation fold",
+      "mpq_plus": 0.4998,
+      "r2": 0.8585,
+      "source": "https://github.com/TissueImageAnalytics/CoNIC/blob/main/notebooks/baseline.ipynb"
+    }
+  ]
+}
